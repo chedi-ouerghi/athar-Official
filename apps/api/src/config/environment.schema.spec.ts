@@ -15,6 +15,12 @@ describe('environmentSchema', () => {
       PORT: 3000,
       LOG_LEVEL: 'info',
       SHUTDOWN_TIMEOUT_MS: 10_000,
+      TABLE_MODE: 'simulation',
+      SIMULATION_SPEED_FACTOR: 1,
+      SIMULATION_FAULT_EVERY_NTH_JOB: 0,
+      SIMULATION_FAULT_AT_PROGRESS: 0.6,
+      JOB_HISTORY_LIMIT: 20,
+      TABLES_DATA_FILE: './data/tables.json',
     });
   });
 
@@ -55,6 +61,47 @@ describe('environmentSchema', () => {
     expect((caught as EnvironmentValidationError).issues).toHaveLength(2);
   });
 
+  describe('table driver settings', () => {
+    it('defaults to simulation', () => {
+      expect(parseEnvironment({}).TABLE_MODE).toBe('simulation');
+    });
+
+    it('accepts hardware at parse time, leaving the refusal to the driver factory', () => {
+      expect(parseEnvironment({ TABLE_MODE: 'hardware' }).TABLE_MODE).toBe('hardware');
+    });
+
+    it('rejects an unknown mode', () => {
+      expect(() => parseEnvironment({ TABLE_MODE: 'real' })).toThrow(EnvironmentValidationError);
+      expect(() => parseEnvironment({ TABLE_MODE: 'Simulation' })).toThrow(
+        EnvironmentValidationError,
+      );
+    });
+
+    it('coerces the numeric simulation settings from strings', () => {
+      const environment = parseEnvironment({
+        SIMULATION_SPEED_FACTOR: '10',
+        SIMULATION_FAULT_EVERY_NTH_JOB: '3',
+        SIMULATION_FAULT_AT_PROGRESS: '0.25',
+      });
+
+      expect(environment.SIMULATION_SPEED_FACTOR).toBe(10);
+      expect(environment.SIMULATION_FAULT_EVERY_NTH_JOB).toBe(3);
+      expect(environment.SIMULATION_FAULT_AT_PROGRESS).toBe(0.25);
+    });
+
+    it.each([
+      ['a zero speed factor', { SIMULATION_SPEED_FACTOR: '0' }],
+      ['a negative speed factor', { SIMULATION_SPEED_FACTOR: '-2' }],
+      ['a non-numeric speed factor', { SIMULATION_SPEED_FACTOR: 'fast' }],
+      ['a negative fault interval', { SIMULATION_FAULT_EVERY_NTH_JOB: '-1' }],
+      ['a fractional fault interval', { SIMULATION_FAULT_EVERY_NTH_JOB: '1.5' }],
+      ['a fault progress above 1', { SIMULATION_FAULT_AT_PROGRESS: '1.1' }],
+      ['a negative fault progress', { SIMULATION_FAULT_AT_PROGRESS: '-0.1' }],
+    ])('rejects %s', (_label, raw) => {
+      expect(() => parseEnvironment(raw)).toThrow(EnvironmentValidationError);
+    });
+  });
+
   it('ignores variables the service does not read', () => {
     const environment = parseEnvironment({ SOME_UNRELATED_FLAG: '1' });
 
@@ -64,6 +111,12 @@ describe('environmentSchema', () => {
       'PORT',
       'LOG_LEVEL',
       'SHUTDOWN_TIMEOUT_MS',
+      'TABLE_MODE',
+      'SIMULATION_SPEED_FACTOR',
+      'SIMULATION_FAULT_EVERY_NTH_JOB',
+      'SIMULATION_FAULT_AT_PROGRESS',
+      'JOB_HISTORY_LIMIT',
+      'TABLES_DATA_FILE',
     ]);
     expect(environmentSchema.shape).not.toHaveProperty('SOME_UNRELATED_FLAG');
   });

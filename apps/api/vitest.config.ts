@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import swc from 'unplugin-swc';
 import { defineConfig } from 'vitest/config';
 
@@ -8,6 +9,16 @@ import { defineConfig } from 'vitest/config';
  * build.
  */
 export default defineConfig({
+  resolve: {
+    // Resolve `@athar/contracts` to its TypeScript source, so a change there is
+    // picked up without rebuilding `dist`. (An alias, because Vitest does not
+    // apply custom export conditions to a workspace package's entry.)
+    alias: {
+      '@athar/contracts': fileURLToPath(
+        new URL('../../packages/contracts/src/index.ts', import.meta.url),
+      ),
+    },
+  },
   plugins: [
     swc.vite({
       module: { type: 'es6' },

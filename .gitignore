@@ -63,3 +63,13 @@ pnpm-debug.*
 Thumbs.db
 .idea/
 *.swp
+# ---------------------------------------------------------------------------
+# API runtime data (never committed)
+#
+# The tables file is registration data for real products, and its lock file;
+# the QR folder is generated artwork. Both are produced by the API and its
+# commands, and can always be regenerated or restored from a backup.
+# ---------------------------------------------------------------------------
+/apps/api/data/
+/apps/api/qr-codes/
+/apps/api/design-previews/

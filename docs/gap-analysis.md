@@ -5,6 +5,13 @@ No source code was changed. Every command result below was produced by running i
 Windows 11, Node v20.19.2, pnpm 10.12.2. Claims that come from reading code rather than running
 it are marked **(by inspection)**.
 
+> **Status update (2026-10-11, after the audit).** Fixed since: 3.1 (dev scripts), 3.2
+> (`EXPO_PUBLIC_*` inlining), 3.3 (application logs through pino), 3.5 (contracts read from
+> source), the error-filter part of 3.6 (domain exceptions carry their own code), the e2e test
+> naming and duplicate `app.init()`, the `packages/contracts` lint and test scripts, and the
+> mobile Vitest ESM warning. Still open: CI, screen-level tests, and the remaining small
+> items in 3.6. The sections below are left as audited, as a record of what was found.
+
 Target journey for this analysis:
 
 > scan a table QR code → open that table's screen → browse 4 designs → pick one → start a

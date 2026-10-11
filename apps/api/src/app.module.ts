@@ -6,21 +6,51 @@ import { ApiExceptionFilter } from './common/http/api-exception.filter.js';
 import { createLoggerModule } from './logging/create-logger.module.js';
 import { ShutdownCoordinator } from './lifecycle/shutdown-coordinator.service.js';
 import { HealthModule } from './health/health.module.js';
+import { DesignsModule } from './designs/designs.module.js';
+import type { Scheduler } from './device/clock.js';
+import { systemClock } from './device/clock.js';
+import { JobsModule } from './jobs/jobs.module.js';
+import { DeviceModule } from './device/device.module.js';
+import { TablesModule, type TablesModuleOptions } from './tables/tables.module.js';
 
 /**
  * Application composition root.
  *
- * `AppModule.forRoot(config)` receives the already-validated configuration
- * instead of reading `process.env`, which keeps the module graph free of
+ * `AppModule.forRoot(config, tables)` receives the already-validated
+ * configuration instead of reading `process.env`, and an already-opened table
+ * repository instead of opening a file, which keeps the module graph free of
  * ambient state and lets integration tests build the real application with an
- * explicit configuration.
+ * explicit configuration and an in-memory repository.
  */
+/**
+ * What a test may replace. `repository` is required: the caller opens it, so a bad
+ * tables file stops the process before Nest starts. The `clock` is shared by the
+ * driver, the tables and the jobs, so they always agree on the time.
+ */
+export interface AppModuleOptions extends TablesModuleOptions {
+  /** Drives the simulator's ticks. Defaults to real timers. */
+  readonly scheduler?: Scheduler;
+}
+
 @Module({})
 export class AppModule {
-  static forRoot(config: AppConfig): DynamicModule {
+  static forRoot(config: AppConfig, options: AppModuleOptions): DynamicModule {
+    const clock = options.clock ?? systemClock;
+
     return {
       module: AppModule,
-      imports: [createLoggerModule(config), AppConfigModule.forRoot(config), HealthModule],
+      imports: [
+        createLoggerModule(config),
+        AppConfigModule.forRoot(config),
+        DeviceModule.forRoot(config, {
+          clock,
+          ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
+        }),
+        TablesModule.forRoot({ ...options, clock }),
+        DesignsModule.forRoot(),
+        JobsModule.forRoot({ historyLimit: config.jobHistoryLimit, clock }),
+        HealthModule,
+      ],
       providers: [
         // Registered through `APP_FILTER` rather than `useGlobalFilters` so
         // that every application built from this module — including the one

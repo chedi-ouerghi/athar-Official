@@ -16,6 +16,10 @@
 
 import { z } from 'zod';
 
+/** Polling interval bounds, shared with the tests. */
+export const MIN_POLL_INTERVAL_MS = 250;
+export const DEFAULT_POLL_INTERVAL_MS = 1_000;
+
 /** Runtime platform, as reported by React Native. */
 export type PlatformName = 'android' | 'ios' | 'web' | (string & {});
 
@@ -50,6 +54,33 @@ const optionalBaseUrl = z
   .transform((value) => (value === undefined || value.length === 0 ? undefined : value))
   .pipe(z.union([z.url(), z.undefined()]));
 
+/**
+ * Hosts whose HTTPS links the app accepts as table links.
+ *
+ * Comma-separated, case-insensitive, hostnames only (no scheme, port or path):
+ * the list is compared with the hostname of an incoming link. Blank means "no
+ * HTTPS link is accepted", which leaves only the custom scheme.
+ */
+const hostListSchema = z
+  .string()
+  .optional()
+  .transform((value) =>
+    (value ?? '')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0),
+  )
+  .pipe(
+    z.array(
+      z
+        .string()
+        .regex(
+          /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/,
+          'must be a bare host name such as app.athar.example (no scheme, port or path)',
+        ),
+    ),
+  );
+
 const rawEnvironmentSchema = z.object({
   /** Explicit API origin, e.g. `http://192.168.1.20:3000`. */
   apiBaseUrl: optionalBaseUrl,
@@ -59,6 +90,15 @@ const rawEnvironmentSchema = z.object({
 
   /** Per-request network timeout. */
   apiTimeoutMs: z.coerce.number().int().positive().default(10_000),
+
+  /** HTTPS hosts accepted as table links. */
+  tableLinkHosts: hostListSchema,
+
+  /** How often the progress screen asks for the job. Not below 250 ms. */
+  pollIntervalMs: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim().length === 0 ? undefined : value),
+    z.coerce.number().int().min(MIN_POLL_INTERVAL_MS).default(DEFAULT_POLL_INTERVAL_MS),
+  ),
 });
 
 /** Unvalidated configuration read from the build environment. */
@@ -66,6 +106,8 @@ export interface RawEnvironment {
   readonly EXPO_PUBLIC_API_BASE_URL?: string | undefined;
   readonly EXPO_PUBLIC_API_PORT?: string | undefined;
   readonly EXPO_PUBLIC_API_TIMEOUT_MS?: string | undefined;
+  readonly EXPO_PUBLIC_TABLE_LINK_HOSTS?: string | undefined;
+  readonly EXPO_PUBLIC_POLL_INTERVAL_MS?: string | undefined;
 }
 
 /** How the effective API base URL was determined. */
@@ -79,6 +121,10 @@ export interface AppEnvironment {
   readonly apiBaseUrlSource: ApiBaseUrlSource;
   /** Network timeout applied to every API request. */
   readonly apiTimeoutMs: number;
+  /** Lowercase hosts whose HTTPS links are accepted as table links. May be empty. */
+  readonly tableLinkHosts: readonly string[];
+  /** Delay between two polls of an active job, in milliseconds. */
+  readonly pollIntervalMs: number;
 }
 
 /**
@@ -94,14 +140,35 @@ export class EnvironmentConfigurationError extends Error {
   }
 }
 
-/** Read the raw configuration from an environment-like source. */
-export function readRawEnvironment(
-  source: RawEnvironment = process.env as RawEnvironment,
-): RawEnvironment {
+/**
+ * Read the raw configuration.
+ *
+ * Without an argument it reads the build environment through literal
+ * `process.env.EXPO_PUBLIC_X` member expressions. That exact syntax is what
+ * Expo's Babel preset replaces with the value at bundle time: reading through
+ * an object (`const env = process.env; env.EXPO_PUBLIC_X`), destructuring, or a
+ * computed key is **not** inlined, and the variable silently arrives as
+ * `undefined` in a built app. Do not "tidy" these lines into a loop.
+ *
+ * Pass `source` to read from a plain object instead, as the tests do.
+ */
+export function readRawEnvironment(source?: RawEnvironment): RawEnvironment {
+  if (source !== undefined) {
+    return {
+      EXPO_PUBLIC_API_BASE_URL: source.EXPO_PUBLIC_API_BASE_URL,
+      EXPO_PUBLIC_API_PORT: source.EXPO_PUBLIC_API_PORT,
+      EXPO_PUBLIC_API_TIMEOUT_MS: source.EXPO_PUBLIC_API_TIMEOUT_MS,
+      EXPO_PUBLIC_TABLE_LINK_HOSTS: source.EXPO_PUBLIC_TABLE_LINK_HOSTS,
+      EXPO_PUBLIC_POLL_INTERVAL_MS: source.EXPO_PUBLIC_POLL_INTERVAL_MS,
+    };
+  }
+
   return {
-    EXPO_PUBLIC_API_BASE_URL: source.EXPO_PUBLIC_API_BASE_URL,
-    EXPO_PUBLIC_API_PORT: source.EXPO_PUBLIC_API_PORT,
-    EXPO_PUBLIC_API_TIMEOUT_MS: source.EXPO_PUBLIC_API_TIMEOUT_MS,
+    EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL,
+    EXPO_PUBLIC_API_PORT: process.env.EXPO_PUBLIC_API_PORT,
+    EXPO_PUBLIC_API_TIMEOUT_MS: process.env.EXPO_PUBLIC_API_TIMEOUT_MS,
+    EXPO_PUBLIC_TABLE_LINK_HOSTS: process.env.EXPO_PUBLIC_TABLE_LINK_HOSTS,
+    EXPO_PUBLIC_POLL_INTERVAL_MS: process.env.EXPO_PUBLIC_POLL_INTERVAL_MS,
   };
 }
 
@@ -144,6 +211,15 @@ export function resolveApiBaseUrl(
   };
 }
 
+/** Which variable a validated key came from, for readable error messages. */
+const VARIABLE_BY_KEY: Readonly<Record<string, string>> = {
+  apiBaseUrl: 'EXPO_PUBLIC_API_BASE_URL',
+  apiPort: 'EXPO_PUBLIC_API_PORT',
+  apiTimeoutMs: 'EXPO_PUBLIC_API_TIMEOUT_MS',
+  tableLinkHosts: 'EXPO_PUBLIC_TABLE_LINK_HOSTS',
+  pollIntervalMs: 'EXPO_PUBLIC_POLL_INTERVAL_MS',
+};
+
 /**
  * Validate a raw environment and resolve it into {@link AppEnvironment}.
  *
@@ -154,27 +230,32 @@ export function createAppEnvironment(raw: RawEnvironment, platform: PlatformName
     apiBaseUrl: raw.EXPO_PUBLIC_API_BASE_URL,
     apiPort: raw.EXPO_PUBLIC_API_PORT,
     apiTimeoutMs: raw.EXPO_PUBLIC_API_TIMEOUT_MS,
+    tableLinkHosts: raw.EXPO_PUBLIC_TABLE_LINK_HOSTS,
+    pollIntervalMs: raw.EXPO_PUBLIC_POLL_INTERVAL_MS,
   });
 
   if (!parsed.success) {
     throw new EnvironmentConfigurationError(
       parsed.error.issues.map((issue) => {
         const key = issue.path.join('.');
-        const variable =
-          key === 'apiBaseUrl'
-            ? 'EXPO_PUBLIC_API_BASE_URL'
-            : key === 'apiPort'
-              ? 'EXPO_PUBLIC_API_PORT'
-              : 'EXPO_PUBLIC_API_TIMEOUT_MS';
+        const variable = VARIABLE_BY_KEY[key.split('.')[0] ?? ''] ?? key;
         return `${variable}: ${issue.message}`;
       }),
     );
   }
 
-  const { apiBaseUrl: configured, apiPort, apiTimeoutMs } = parsed.data;
+  const {
+    apiBaseUrl: configured,
+    apiPort,
+    apiTimeoutMs,
+    tableLinkHosts,
+    pollIntervalMs,
+  } = parsed.data;
 
   return {
     ...resolveApiBaseUrl(configured, platform, apiPort),
     apiTimeoutMs,
+    tableLinkHosts,
+    pollIntervalMs,
   };
 }

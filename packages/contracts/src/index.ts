@@ -13,4 +13,5 @@ export * from './device.js';
 export * from './drawing-job.js';
 export * from './errors.js';
 export * from './health.js';
+export * from './polar-path.js';
 export * from './table.js';

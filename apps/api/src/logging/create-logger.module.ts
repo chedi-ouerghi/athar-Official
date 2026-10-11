@@ -25,11 +25,14 @@ const REQUEST_ID_HEADER = 'x-request-id';
  * Redaction is applied by pino itself, so a value cannot leak through a custom
  * serialiser or a log transport.
  */
-const REDACTED_PATHS = [
+export const REDACTED_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
   `req.headers["${REQUEST_ID_HEADER}"]`,
   'res.headers["set-cookie"]',
+  // The admin key, if a configuration object is ever logged by mistake.
+  'adminApiKey',
+  '*.adminApiKey',
 ];
 
 /** Placeholder written in place of a redacted value. */

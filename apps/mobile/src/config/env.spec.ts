@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_POLL_INTERVAL_MS,
+  MIN_POLL_INTERVAL_MS,
   EnvironmentConfigurationError,
   createAppEnvironment,
   joinUrl,
@@ -61,6 +63,8 @@ describe('createAppEnvironment', () => {
       apiBaseUrl: 'http://localhost:3000',
       apiBaseUrlSource: 'platform-default',
       apiTimeoutMs: 10_000,
+      tableLinkHosts: [],
+      pollIntervalMs: 1_000,
     });
   });
 
@@ -74,6 +78,8 @@ describe('createAppEnvironment', () => {
       apiBaseUrl: 'http://10.0.2.2:4000',
       apiBaseUrlSource: 'platform-default',
       apiTimeoutMs: 2500,
+      tableLinkHosts: [],
+      pollIntervalMs: 1_000,
     });
   });
 
@@ -100,5 +106,61 @@ describe('createAppEnvironment', () => {
     expect(() => createAppEnvironment({ EXPO_PUBLIC_API_TIMEOUT_MS: 'soon' }, 'ios')).toThrow(
       /EXPO_PUBLIC_API_TIMEOUT_MS/,
     );
+  });
+
+  describe('table link hosts', () => {
+    it('parses a comma-separated list, trimmed and lowercased', () => {
+      const environment = createAppEnvironment(
+        { EXPO_PUBLIC_TABLE_LINK_HOSTS: ' App.Athar.Example , scan.athar.example ,' },
+        'ios',
+      );
+
+      expect(environment.tableLinkHosts).toStrictEqual(['app.athar.example', 'scan.athar.example']);
+    });
+
+    it('treats blank as an empty list, which accepts only the custom scheme', () => {
+      expect(
+        createAppEnvironment({ EXPO_PUBLIC_TABLE_LINK_HOSTS: '  ' }, 'ios').tableLinkHosts,
+      ).toStrictEqual([]);
+    });
+
+    it.each(['https://app.athar.example', 'app.athar.example/t', 'app.athar.example:8443', 'a b'])(
+      'rejects %s, naming the variable',
+      (value) => {
+        expect(() => createAppEnvironment({ EXPO_PUBLIC_TABLE_LINK_HOSTS: value }, 'ios')).toThrow(
+          /EXPO_PUBLIC_TABLE_LINK_HOSTS/,
+        );
+      },
+    );
+  });
+
+  describe('poll interval', () => {
+    it('defaults to one second', () => {
+      expect(createAppEnvironment({}, 'ios').pollIntervalMs).toBe(DEFAULT_POLL_INTERVAL_MS);
+    });
+
+    it('treats blank as unset', () => {
+      expect(createAppEnvironment({ EXPO_PUBLIC_POLL_INTERVAL_MS: '' }, 'ios').pollIntervalMs).toBe(
+        1_000,
+      );
+    });
+
+    it('accepts the minimum and rejects anything below it', () => {
+      expect(
+        createAppEnvironment({ EXPO_PUBLIC_POLL_INTERVAL_MS: '250' }, 'ios').pollIntervalMs,
+      ).toBe(MIN_POLL_INTERVAL_MS);
+      expect(() => createAppEnvironment({ EXPO_PUBLIC_POLL_INTERVAL_MS: '249' }, 'ios')).toThrow(
+        /EXPO_PUBLIC_POLL_INTERVAL_MS/,
+      );
+    });
+
+    it('rejects a value that is not a whole number', () => {
+      expect(() => createAppEnvironment({ EXPO_PUBLIC_POLL_INTERVAL_MS: 'fast' }, 'ios')).toThrow(
+        /EXPO_PUBLIC_POLL_INTERVAL_MS/,
+      );
+      expect(() => createAppEnvironment({ EXPO_PUBLIC_POLL_INTERVAL_MS: '1000.5' }, 'ios')).toThrow(
+        /EXPO_PUBLIC_POLL_INTERVAL_MS/,
+      );
+    });
   });
 });

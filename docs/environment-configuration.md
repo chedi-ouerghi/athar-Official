@@ -27,13 +27,78 @@ Defined and validated in `apps/api/src/config/environment.schema.ts`. The
 process **refuses to start** if any value is missing or invalid, and reports
 every problem at once.
 
-| Variable              | Type    | Default       | Purpose                                                      |
-| --------------------- | ------- | ------------- | ------------------------------------------------------------ |
-| `NODE_ENV`            | enum    | `development` | `development`, `test` or `production`                        |
-| `HOST`                | string  | `0.0.0.0`     | Interface the HTTP server binds to                           |
-| `PORT`                | integer | `3000`        | TCP port                                                     |
-| `LOG_LEVEL`           | enum    | `info`        | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
-| `SHUTDOWN_TIMEOUT_MS` | integer | `10000`       | Grace period for in-flight requests on `SIGINT`/`SIGTERM`    |
+| Variable                         | Type         | Default       | Purpose                                                                 |
+| -------------------------------- | ------------ | ------------- | ----------------------------------------------------------------------- |
+| `NODE_ENV`                       | enum         | `development` | `development`, `test` or `production`                                   |
+| `HOST`                           | string       | `0.0.0.0`     | Interface the HTTP server binds to                                      |
+| `PORT`                           | integer      | `3000`        | TCP port                                                                |
+| `LOG_LEVEL`                      | enum         | `info`        | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`            |
+| `SHUTDOWN_TIMEOUT_MS`            | integer      | `10000`       | Grace period for in-flight requests on `SIGINT`/`SIGTERM`               |
+| `TABLE_MODE`                     | enum         | `simulation`  | `simulation` or `hardware`; `hardware` refuses to start (below)         |
+| `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`           | Divides simulated drawing durations (`10`: a 10-minute drawing takes 1) |
+| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`           | Every Nth simulated job faults; `0` never                               |
+| `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`          | Drawing jobs remembered per table (below)                               |
+| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`         | Progress at which an injected fault occurs                              |
+
+### Tables, admin access and QR links
+
+| Variable               | Default              | Purpose                                                              |
+| ---------------------- | -------------------- | -------------------------------------------------------------------- |
+| `TABLES_DATA_FILE`     | `./data/tables.json` | JSON file that stores the registered tables                          |
+| `ADMIN_API_KEY`        | _(unset)_            | Secret for `/api/v1/admin/**`, sent as `Authorization: Bearer <key>` |
+| `PUBLIC_LINK_BASE_URL` | _(unset)_            | Origin used to build the link in each table's QR code                |
+
+**`TABLES_DATA_FILE`.** Relative paths are resolved from the directory the API
+runs in (`apps/api` under `pnpm`). The file and its directory are created on
+first start. It holds registration data only (no secrets, no personal data) and
+must be on **persistent storage** in a real deployment. Only one process may write
+it: the API holds `<file>.lock` while it runs, and the `table:create` command
+refuses to run while the API does. A corrupt or unknown-version file stops the API
+from starting, with a message naming the file, and is never overwritten. The file
+and `./qr-codes` are git-ignored.
+
+**`ADMIN_API_KEY`.** In **production** the API refuses to start if it is missing,
+shorter than 32 characters, or still the placeholder from `.env.example`. In
+development and test it is optional, and when unset the admin endpoints **refuse
+every request** (they fail closed). Generate one with, for example,
+`openssl rand -base64 48` or
+`node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"`.
+It is compared in constant time, accepted only in the `Authorization` header, and
+redacted from logs. It belongs to the server: never put it in the mobile app, in
+an `EXPO_PUBLIC_*` variable, or in a QR code. There is one shared key with no
+identity and no audit trail, and rotating it means restarting the API with a new
+value (see open decision 18 in [architecture.md](architecture.md)).
+
+**`PUBLIC_LINK_BASE_URL`.** An origin such as `https://app.athar.example`: no path,
+query or credentials; a trailing slash is ignored. Required in production, where
+it must be `https`. Unset in development, QR links use `athar://t/<tableId>`,
+which opens the app but cannot be scanned by a phone's camera app. The domain is
+baked into every printed code, so choose one that will outlive the products.
+
+**`JOB_HISTORY_LIMIT`** (default `20`, at least `1`). Drawing jobs remembered per
+table, newest first. When a table has more, its oldest _finished_ jobs are
+forgotten, and their idempotency entries with them, so a request id whose job is
+gone makes a new job again. A running job is never forgotten. Jobs are held in
+memory and are all lost when the API restarts; the app treats `JOB_NOT_FOUND` for a
+job it knew as a normal state.
+
+### Table mode
+
+`TABLE_MODE` selects the table driver. `simulation` (the default) drives a
+simulated table. `hardware` is a valid value but **the API refuses to start
+with it**, because no hardware driver exists yet:
+
+```
+TABLE_MODE=hardware is not available: no hardware table driver is installed in this build.
+Set TABLE_MODE=simulation.
+```
+
+The refusal happens while the application is being assembled, before any port
+is bound, and exits with a non-zero code. The `SIMULATION_*` variables are read
+only by the simulator and have no effect otherwise. They exist so demos and
+manual testing can speed drawings up (`SIMULATION_SPEED_FACTOR=20`) and so the
+error path can be exercised on demand
+(`SIMULATION_FAULT_EVERY_NTH_JOB=2 SIMULATION_FAULT_AT_PROGRESS=0.5`).
 
 ### Why `HOST` defaults to `0.0.0.0`
 
@@ -51,11 +116,23 @@ other value emits newline-delimited JSON, which is what log shippers expect.
 
 Read and validated in `apps/mobile/src/config/env.ts`.
 
-| Variable                     | Type    | Default   | Purpose                                             |
-| ---------------------------- | ------- | --------- | --------------------------------------------------- |
-| `EXPO_PUBLIC_API_BASE_URL`   | URL     | _(unset)_ | Full origin of the API, e.g. `http://10.1.2.3:3000` |
-| `EXPO_PUBLIC_API_PORT`       | integer | `3000`    | Port used to derive the default base URL            |
-| `EXPO_PUBLIC_API_TIMEOUT_MS` | integer | `10000`   | Network timeout applied to every request            |
+| Variable                       | Type                  | Default   | Purpose                                                             |
+| ------------------------------ | --------------------- | --------- | ------------------------------------------------------------------- |
+| `EXPO_PUBLIC_API_BASE_URL`     | URL                   | _(unset)_ | Full origin of the API, e.g. `http://10.1.2.3:3000`                 |
+| `EXPO_PUBLIC_API_PORT`         | integer               | `3000`    | Port used to derive the default base URL                            |
+| `EXPO_PUBLIC_API_TIMEOUT_MS`   | integer               | `10000`   | Network timeout applied to every request                            |
+| `EXPO_PUBLIC_TABLE_LINK_HOSTS` | comma-separated hosts | _(empty)_ | HTTPS hosts accepted in a table link; empty accepts only `athar://` |
+| `EXPO_PUBLIC_POLL_INTERVAL_MS` | integer >= 250        | `1000`    | How often the progress screen asks for the running job              |
+
+`EXPO_PUBLIC_TABLE_LINK_HOSTS` takes bare host names (`app.athar.example`, no
+scheme, port or path), compared case-insensitively with the host of a link. It is
+read in two places that must agree: the app's link parser, and `app.config.ts`,
+which turns each host into an iOS associated domain and an Android `autoVerify`
+intent filter. Leave it empty until the domain is decided (architecture.md, open
+decision 3). Even once set, HTTPS links open the app only in a build that carries
+those settings and only if the host serves `/.well-known/apple-app-site-association`
+and `/.well-known/assetlinks.json`; they never work in Expo Go, which does not register
+either the `athar://` scheme or any domain.
 
 ### `EXPO_PUBLIC_` means public
 

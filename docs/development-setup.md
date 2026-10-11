@@ -24,12 +24,22 @@ From the repository root:
 pnpm install
 ```
 
-This also compiles `@athar/contracts` (its `prepare` script), which both
-applications consume. After editing files in `packages/contracts`, rebuild it:
+This also compiles `@athar/contracts` (its `prepare` script). The compiled
+`dist/` is what the **production** API runs and what `pnpm build` produces;
+day-to-day work does not need you to rebuild it by hand:
 
-```bash
-pnpm --filter @athar/contracts build
-```
+| Consumer                     | Reads contracts from | After you edit `packages/contracts/src`                  |
+| ---------------------------- | -------------------- | -------------------------------------------------------- |
+| Type checking (API, mobile)  | source               | Seen immediately                                         |
+| API tests, mobile tests      | source               | Seen immediately                                         |
+| Metro (the app)              | source               | Seen on the next reload                                  |
+| `pnpm dev` / `pnpm dev:api`  | `dist/`, kept fresh  | The contracts watcher rebuilds `dist/`, the API restarts |
+| `pnpm build`, production run | `dist/`              | `pnpm build` rebuilds contracts first                    |
+
+The API cannot run TypeScript directly on Node 20, which is why its dev server
+reads `dist/`; `pnpm dev:api` runs the contracts watcher next to it for that
+reason. If you run the API some other way after changing contracts, rebuild with
+`pnpm --filter @athar/contracts build`.
 
 ## Environment files
 
@@ -49,8 +59,19 @@ variable list and for addressing the API from a physical device.
 pnpm dev
 ```
 
-This runs the API (`http://localhost:3000`) and the Expo dev server
-(`http://localhost:8081`) together, shutting both down when either stops.
+This runs three things together, with their output interleaved and prefixed:
+
+- the API (`http://localhost:3000`), built once and then watched;
+- the `@athar/contracts` watcher (`tsc --watch`), which keeps `dist/` current
+  for the API;
+- the Expo dev server (`http://localhost:8081`).
+
+Stopping it (Ctrl+C) stops all three. If a port is taken, set `PORT` for the
+API (`PORT=3100 pnpm dev`) and `RCT_METRO_PORT` for Metro; keep the app's
+`EXPO_PUBLIC_API_PORT` or `EXPO_PUBLIC_API_BASE_URL` in step with `PORT`.
+The Expo dev server runs without a terminal UI here, so its interactive keys
+(`a`, `r`, ...) are unavailable; use `pnpm dev:mobile` in a second terminal
+for those.
 
 ## Run the API alone
 
@@ -58,8 +79,11 @@ This runs the API (`http://localhost:3000`) and the Expo dev server
 pnpm dev:api
 ```
 
-`apps/api` runs `tsc --watch` alongside `node --watch`, so editing a source file
-rebuilds and restarts the service automatically.
+This also starts the contracts watcher. `apps/api` first builds once, so a clean
+checkout (no `dist/`) works, then runs `tsc --watch` alongside
+`node --watch`: editing a source file, in the API or in `packages/contracts`,
+rebuilds and restarts the service automatically. Logs are pretty-printed in
+development.
 
 Verify it:
 
@@ -114,8 +138,18 @@ ip route get 1.1.1.1 | awk '{print $7}'
 EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:3000
 ```
 
-Restart the dev server afterwards: `EXPO_PUBLIC_*` values are inlined into the
-bundle when it is built.
+Restart the dev server afterwards, **clearing the bundler cache**:
+`EXPO_PUBLIC_*` values are inlined into the bundle when a file is transformed,
+and Metro reuses cached transforms, so a changed value can otherwise appear to
+be ignored.
+
+```bash
+pnpm dev:mobile --clear
+```
+
+`apps/mobile/src/config/env.ts` must keep reading each variable as a literal
+`process.env.EXPO_PUBLIC_NAME`. Expo only inlines that exact syntax; reading
+them through an object or a loop silently yields `undefined` in a built app.
 
 ## Development Builds
 
@@ -135,6 +169,108 @@ pnpm exec eas build --profile development --platform android
 `production` profiles. On Android, a development build that talks to a local
 HTTP API also needs cleartext traffic enabled through `expo-build-properties`
 (see [future-infrastructure-decisions.md](future-infrastructure-decisions.md)).
+
+## Provision a table
+
+A table must be registered before its QR code or screen can work. Each table gets a
+server-generated, random id.
+
+```bash
+# register a table (the API must not be running: see below)
+pnpm --filter @athar/api table:create --name "Main hall" --location "Ground floor"
+
+# write the QR code for it: apps/api/qr-codes/<id>.svg and .png
+pnpm --filter @athar/api table:qr <id>
+```
+
+For a code that a phone's camera can scan, set `PUBLIC_LINK_BASE_URL` in
+`apps/api/.env` first; without it the code holds a development link
+(`athar://t/<id>`) that only opens the app. Registered tables live in
+`apps/api/data/tables.json`, which is git-ignored.
+
+`table:create` writes the tables file, and only one process may write it, so it
+refuses while the API is running (it says so). To register tables while the API
+is up, use the admin endpoint, with the key from `ADMIN_API_KEY`:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/admin/tables \
+  -H "Authorization: Bearer $ADMIN_API_KEY" -H "content-type: application/json" \
+  -d '{"displayName": "Main hall", "location": "Ground floor"}'
+```
+
+`table:qr` only reads and is safe to run any time. If the API is killed rather than
+stopped, it leaves a lock file behind; the next start or command detects that the
+process is gone and carries on.
+
+## Try a drawing
+
+With the API running (`pnpm dev:api`), the simulated table can be driven by hand. A
+drawing takes minutes at real speed; `SIMULATION_SPEED_FACTOR=20 pnpm dev:api` makes
+it twenty times faster. Set `ADMIN_API_KEY` first (any value, in development).
+
+```bash
+KEY=anything-you-like
+curl -s -X POST localhost:3000/api/v1/admin/tables -H "Authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"displayName":"Demo","location":"Desk"}'   # note the id
+curl -s localhost:3000/api/v1/tables/<id>
+curl -s localhost:3000/api/v1/designs
+curl -s -X POST localhost:3000/api/v1/tables/<id>/jobs -H 'content-type: application/json' \
+  -d '{"designId":"star","clientRequestId":"'$(node -e "console.log(crypto.randomUUID())")'"}'
+curl -s localhost:3000/api/v1/jobs/<jobId>        # poll it: progress rises, then "completed"
+curl -s -X POST localhost:3000/api/v1/jobs/<jobId>/pause   # or /resume, /stop
+```
+
+Jobs live in memory and disappear whenever the API restarts, and in `pnpm dev:api`
+the API restarts every time you save a source file (or a contracts file), so a drawing
+in progress is lost on each save. That is expected in development.
+
+Starting `pnpm dev:api` does **not** restart it. Both packages build incrementally
+(`dist/.tsbuildinfo`), so the watchers that start after the first build find nothing
+to rewrite. Without that, the watcher's first full emit made `node --watch` restart a
+few seconds after the first healthy response, which silently dropped any job started
+in that window.
+
+## Try it in Expo Go on a phone
+
+1. **Network.** Put the phone and the computer on the same Wi-Fi. Find the computer's
+   LAN address (`ipconfig` on Windows; use the IPv4 address of the Wi-Fi adapter).
+   Allow Node through the Windows firewall for private networks if asked.
+2. **API.** In `apps/api/.env` set `ADMIN_API_KEY=anything-you-like`. For quick
+   drawings add `SIMULATION_SPEED_FACTOR=20`. Optionally
+   `SIMULATION_FAULT_EVERY_NTH_JOB=3` to see a failed drawing. Start it with
+   `pnpm dev:api` (it listens on `0.0.0.0:3000`).
+3. **Register a table, then stop the API** (`table:create` refuses while it runs), or
+   use the admin endpoint with `curl` while it runs:
+
+   ```bash
+   pnpm --filter @athar/api table:create --name "Main hall" --location "Ground floor"
+   pnpm --filter @athar/api table:qr <id>     # writes apps/api/qr-codes/<id>.svg and .png
+   ```
+
+   With no `PUBLIC_LINK_BASE_URL` the code holds `athar://t/<id>`, which the in-app
+   scanner reads (Expo Go itself cannot open it from the phone's camera app). Open the
+   PNG or SVG on the computer screen. Start the API again.
+
+4. **App.** Create `apps/mobile/.env` with
+   `EXPO_PUBLIC_API_BASE_URL=http://<your-LAN-IP>:3000`, then `pnpm dev:mobile`, and
+   scan the Expo QR code with Expo Go (Android) or the Camera app (iOS).
+5. **Use it.** Home, then "Scan your table", allow the camera, point it at the QR
+   code on the computer screen. Or "Enter table code" and type the id.
+
+If the app says it cannot connect, open Home, then "Connection details": it shows
+the address the app is using and whether the API answers.
+
+## Look at the designs
+
+```bash
+pnpm --filter @athar/api designs:svg
+```
+
+writes `apps/api/design-previews/<slug>.svg` for each of the four designs and
+`contact-sheet.svg` with all of them. Open them in a browser. The pictures follow
+the curve the table would draw, with the table's rim, and a green dot at the
+centre where every design starts and ends. The folder is git-ignored.
+[designs.md](designs.md) explains each design.
 
 ## Quality gates
 

@@ -35,4 +35,33 @@ config.resolver.nodeModulesPaths = [
 // real location in the store. Disabling the hierarchical lookup breaks exactly
 // that, and the bundler then fails to resolve transitive imports.
 
+// `@athar/contracts` is consumed from its TypeScript source, so an edit there
+// reaches the app through Metro's normal reload instead of needing `dist` to
+// be rebuilt first. Production behaviour is unchanged: the API still runs the
+// compiled package, and this only affects what Metro bundles.
+//
+// Two things need help. The bare specifier is mapped straight to the source
+// entry, which does not depend on how Metro handles custom export conditions.
+// And the
+// package's own relative imports are written `./api.js`, as Node's ESM
+// resolution requires, while the file on disk is `api.ts`; Metro does not map
+// `.js` to `.ts`, so that suffix is rewritten for files inside the package.
+const contractsSource = path.resolve(workspaceRoot, 'packages', 'contracts', 'src');
+
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === '@athar/contracts') {
+    return { type: 'sourceFile', filePath: path.join(contractsSource, 'index.ts') };
+  }
+
+  if (
+    moduleName.startsWith('.') &&
+    moduleName.endsWith('.js') &&
+    context.originModulePath.startsWith(contractsSource)
+  ) {
+    return context.resolveRequest(context, moduleName.replace(/.js$/, '.ts'), platform);
+  }
+
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 module.exports = config;

@@ -6,8 +6,7 @@ import {
 } from '@athar/contracts';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { createConfiguredApp } from '../src/bootstrap.js';
-import { createTestConfig } from './create-test-config.js';
+import { createTestApp } from './create-test-app.js';
 
 /**
  * HTTP-level integration tests.
@@ -20,8 +19,8 @@ describe('ATHAR API (HTTP)', () => {
   let app: NestExpressApplication;
 
   beforeAll(async () => {
-    app = await createConfiguredApp(createTestConfig());
-    await app.init();
+    // `createConfiguredApp` already returns an initialised application.
+    app = await createTestApp();
   });
 
   afterAll(async () => {
@@ -71,9 +70,11 @@ describe('ATHAR API (HTTP)', () => {
       const payload = readyResponseSchema.parse(response.body);
 
       expect(payload.status).toBe('ok');
+      expect(payload.tableMode).toBe('simulation');
       expect(payload.checks.map((check) => check.name).sort()).toStrictEqual([
         'configuration',
         'event-loop',
+        'table-driver',
       ]);
     });
 
@@ -104,7 +105,7 @@ describe('ATHAR API (HTTP)', () => {
       expect(apiErrorResponseSchema.parse(response.body).error.requestId).toBe(correlationId);
     });
 
-    it('rejects a malformed JSON body with VALIDATION_FAILED', async () => {
+    it('rejects a malformed JSON body with BAD_REQUEST', async () => {
       const response = await request(app.getHttpServer())
         .post('/api/v1/anything')
         .set('content-type', 'application/json')

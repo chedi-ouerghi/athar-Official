@@ -1,0 +1,142 @@
+import type { TranslationKey } from './en';
+
+/**
+ * Arabic UI strings. Must define every key of the English file.
+ *
+ * Modern Standard Arabic. This copy is a first draft and needs review by a
+ * native speaker before release (who writes and reviews the Arabic content is
+ * open decision 17).
+ */
+export const ar: Readonly<Record<TranslationKey, string>> = {
+  'common.retry': 'حاول مرة أخرى',
+  'common.loading': 'جارٍ التحميل…',
+  'common.wait': 'يُرجى الانتظار',
+
+  'state.loading': 'جارٍ التحميل',
+
+  'errorState.title': 'حدث خطأ ما',
+
+  'error.generic': 'حدث خطأ ما. يُرجى المحاولة مرة أخرى.',
+  'error.connection': 'تعذّر الاتصال. تحقّق من اتصالك بالإنترنت وحاول مرة أخرى.',
+  'error.slow': 'يستغرق هذا وقتًا أطول من المتوقع. يُرجى المحاولة مرة أخرى.',
+  'error.unexpected': 'حدث خطأ من جانبنا. يُرجى المحاولة مرة أخرى بعد قليل.',
+  'error.unavailable': 'الخدمة غير متاحة مؤقتًا. يُرجى المحاولة مرة أخرى قريبًا.',
+  'error.invalidInput': 'يبدو أن هناك خطأً في ما أدخلته. يُرجى التحقق والمحاولة مرة أخرى.',
+  'error.notFound': 'تعذّر العثور على ما كنت تبحث عنه.',
+  'error.tableNotFound': 'تعذّر العثور على هذه الطاولة. تحقّق من الرمز وحاول مرة أخرى.',
+  'error.designNotFound': 'هذا التصميم لم يعد متاحًا.',
+  'error.jobNotFound': 'هذا الرسم لم يعد متاحًا. يُرجى البدء من جديد.',
+  'error.tableDisabled': 'هذه الطاولة متوقفة عن العمل حاليًا.',
+  'error.tableOffline': 'تعذّر الوصول إلى هذه الطاولة حاليًا. يُرجى المحاولة لاحقًا.',
+  'error.tableBusy': 'هذه الطاولة ترسم الآن. يُرجى الانتظار حتى تنتهي.',
+  'error.notAllowedNow': 'هذا غير ممكن الآن. ربما تغيّر الرسم للتو.',
+
+  'mode.simulation': 'محاكاة',
+  'mode.hardware': 'طاولة حقيقية',
+  'mode.unknown': 'وضع غير معروف',
+
+  'language.title': 'اللغة',
+  'language.en': 'English',
+  'language.ar': 'العربية',
+  'language.restartRequired': 'أغلق التطبيق ثم افتحه من جديد لإكمال تغيير اللغة.',
+
+  'designPreview.label': 'معاينة التصميم',
+  'designPreview.labelWithProgress': 'معاينة التصميم، تم رسم {percent}',
+
+  'home.tagline': 'شاهد الأنماط تتشكّل في الرمال.',
+  'home.scan': 'امسح رمز طاولتك',
+  'home.enterCode': 'أدخل رمز الطاولة',
+  'home.diagnostics': 'تفاصيل الاتصال',
+
+  'code.label': 'رمز الطاولة أو رابطها',
+  'code.placeholder': 'مثال: k7q3x9m2d8r5t6w4',
+  'code.submit': 'فتح الطاولة',
+  'code.invalid': 'هذا الرمز غير صالح. تحقّق منه وحاول مرة أخرى.',
+
+  'scan.title': 'امسح رمز QR الموجود على طاولتك',
+  'scan.hint': 'وجّه الكاميرا نحو الرمز الموجود على الطاولة.',
+  'scan.unrecognised': 'هذا ليس رمز طاولة من أثر. جرّب الرمز الموجود على طاولتك.',
+  'scan.permission.title': 'الوصول إلى الكاميرا',
+  'scan.permission.explain':
+    'يستخدم التطبيق الكاميرا فقط لقراءة رمز QR الموجود على طاولتك. لا يتم تسجيل أي شيء أو حفظه.',
+  'scan.permission.allow': 'السماح بالكاميرا',
+  'scan.permission.denied':
+    'الوصول إلى الكاميرا متوقف. يمكنك تفعيله من الإعدادات، أو إدخال رمز الطاولة بدلًا من ذلك.',
+  'scan.permission.settings': 'فتح الإعدادات',
+  'scan.enterInstead': 'أدخل رمز الطاولة بدلًا من ذلك',
+
+  'table.status': 'الحالة',
+  'table.connection.online': 'جاهزة للرسم',
+  'table.connection.offline': 'غير متصلة',
+  'table.connection.busy': 'ترسم الآن',
+  'table.connection.error': 'لا تعمل',
+  'table.connection.disabled': 'متوقفة',
+  'table.designsTitle': 'اختر تصميمًا',
+  'table.scanAnother': 'امسح رمزًا آخر',
+  'table.unknown.title': 'لم يتم العثور على الطاولة',
+  'table.disabled.title': 'هذه الطاولة متوقفة',
+  'table.disabled.body': 'لا تستقبل رسومات جديدة حاليًا. يُرجى المحاولة لاحقًا.',
+  'table.offline.title': 'هذه الطاولة غير متصلة',
+  'table.offline.body': 'تعذّر الوصول إليها حاليًا. يُرجى المحاولة بعد قليل.',
+  'table.busy.title': 'هذه الطاولة ترسم الآن',
+  'table.busy.body': 'هناك من يرسم هنا بالفعل. يمكنك مشاهدة الرسم، أو العودة بعد أن ينتهي.',
+  'table.watch': 'شاهد الرسم',
+
+  'duration.minutes': 'حوالي {value} دقيقة',
+  'duration.seconds': 'حوالي {value} ثانية',
+
+  'design.inspiration.traditional': 'إلهام تقليدي',
+  'design.inspiration.modern': 'تفسير حديث',
+  'design.sources': 'المصادر',
+  'design.estimated': 'الوقت المتوقع',
+  'design.start': 'ابدأ الرسم',
+  'design.watchRunning': 'شاهد الرسم الجاري',
+
+  'job.state.queued': 'جارٍ التجهيز',
+  'job.state.drawing': 'يرسم',
+  'job.state.paused': 'متوقف مؤقتًا',
+  'job.state.completed': 'اكتمل',
+  'job.state.failed': 'توقف بسبب مشكلة',
+  'job.state.cancelled': 'تم الإيقاف',
+  'job.percentDone': 'اكتمل {percent}',
+  'job.pause': 'إيقاف مؤقت',
+  'job.resume': 'متابعة',
+  'job.stop': 'إيقاف',
+  'job.stop.confirmTitle': 'هل تريد إيقاف هذا الرسم؟',
+  'job.stop.confirmBody': 'سيبقى ما تم رسمه حتى الآن كما هو.',
+  'job.stop.confirm': 'إيقاف الرسم',
+  'job.stop.keep': 'متابعة الرسم',
+  'job.reconnecting': 'انقطع الاتصال. تتم إعادة المحاولة…',
+  'job.gone.title': 'هذا الرسم لم يعد متاحًا',
+  'job.backToTable': 'العودة إلى الطاولة',
+
+  'job.error.OFFLINE': 'انقطع اتصال الطاولة.',
+  'job.error.BUSY': 'كانت الطاولة مشغولة بعمل آخر.',
+  'job.error.TRAJECTORY_REJECTED': 'تعذّر على الطاولة رسم هذا التصميم.',
+  'job.error.FAULT': 'أبلغت الطاولة عن مشكلة أثناء الرسم.',
+  'job.error.SIMULATED_FAULT': 'تم إدخال مشكلة افتراضية لأغراض الاختبار.',
+  'job.error.unknown': 'حدث خطأ ما أثناء الرسم.',
+
+  'result.title.completed.simulation': 'اكتملت محاكاة الرسم',
+  'result.title.completed.hardware': 'اكتمل الرسم',
+  'result.title.completed.unknown': 'اكتمل الرسم',
+  'result.title.failed.simulation': 'تعذّر إكمال محاكاة الرسم',
+  'result.title.failed.hardware': 'تعذّر إكمال الرسم',
+  'result.title.failed.unknown': 'تعذّر إكمال الرسم',
+  'result.title.cancelled.simulation': 'تم إيقاف محاكاة الرسم',
+  'result.title.cancelled.hardware': 'تم إيقاف الرسم',
+  'result.title.cancelled.unknown': 'تم إيقاف الرسم',
+  'result.body.completed.simulation': 'كانت هذه محاكاة. لم يُرسم شيء على طاولة حقيقية.',
+  'result.body.completed.hardware': 'نمطك جاهز الآن في الرمال.',
+  'result.body.completed.unknown': 'انتهى الرسم.',
+  'result.body.cancelled.simulation': 'لقد أوقفت المحاكاة.',
+  'result.body.cancelled.hardware': 'سيبقى ما تم رسمه حتى الآن كما هو.',
+  'result.body.cancelled.unknown': 'تم إيقاف الرسم قبل أن ينتهي.',
+  'result.drawAgain': 'ارسم مرة أخرى',
+
+  'diagnostics.readiness': 'الجاهزية',
+  'diagnostics.ready': 'جاهز',
+  'diagnostics.notReady': 'غير جاهز',
+  'diagnostics.tableMode': 'وضع الطاولة',
+  'diagnostics.checks': 'الفحوصات',
+};

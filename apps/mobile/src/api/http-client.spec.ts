@@ -147,4 +147,109 @@ describe('HttpClient', () => {
   it('reports the configured origin', () => {
     expect(client(vi.fn<FetchLike>()).origin).toBe('http://api.test:3000');
   });
+
+  describe('correlation id', () => {
+    it('sends x-request-id on every GET and POST, a new one each time', async () => {
+      const fetchImpl = vi
+        .fn<FetchLike>()
+        .mockImplementation(() => Promise.resolve(jsonResponse({ status: 'ok', count: 0 })));
+      const http = client(fetchImpl);
+
+      await http.get('/a', payloadSchema);
+      await http.post('/b', {}, payloadSchema);
+
+      const ids = fetchImpl.mock.calls.map(
+        ([, init]) => (init?.headers as Record<string, string>)['x-request-id'],
+      );
+
+      expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(ids[1]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(ids[0]).not.toBe(ids[1]);
+    });
+
+    it('attaches the id it sent to failures that have no server envelope', async () => {
+      const http = new HttpClient({
+        baseUrl: 'http://api.test:3000',
+        timeoutMs: 1_000,
+        fetchImpl: vi.fn<FetchLike>().mockRejectedValue(new TypeError('fetch failed')),
+        generateRequestId: () => 'req-client-1',
+      });
+
+      const error = await http.get('/x', payloadSchema).catch((e: unknown) => e);
+
+      expect((error as ApiError).requestId).toBe('req-client-1');
+    });
+  });
+
+  describe('post', () => {
+    it('sends a JSON body with the JSON content type, and validates the response', async () => {
+      const fetchImpl = vi
+        .fn<FetchLike>()
+        .mockResolvedValue(jsonResponse({ status: 'created', count: 1 }, { status: 201 }));
+
+      const result = await client(fetchImpl).post('/jobs', { designId: 'dunes' }, payloadSchema);
+
+      const [url, init] = fetchImpl.mock.calls[0] ?? [];
+      expect(url).toBe('http://api.test:3000/jobs');
+      expect(init?.method).toBe('POST');
+      expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+      expect(init?.body).toBe('{"designId":"dunes"}');
+      expect(result).toStrictEqual({ status: 'created', count: 1 });
+    });
+
+    it('sends an empty object when there is no payload', async () => {
+      const fetchImpl = vi
+        .fn<FetchLike>()
+        .mockResolvedValue(jsonResponse({ status: 'ok', count: 0 }));
+
+      await client(fetchImpl).post('/jobs/1/pause', undefined, payloadSchema);
+
+      expect(fetchImpl.mock.calls[0]?.[1]?.body).toBe('{}');
+    });
+
+    it('sends no body or content type on GET', async () => {
+      const fetchImpl = vi
+        .fn<FetchLike>()
+        .mockResolvedValue(jsonResponse({ status: 'ok', count: 0 }));
+
+      await client(fetchImpl).get('/health', payloadSchema);
+
+      const init = fetchImpl.mock.calls[0]?.[1];
+      expect(init?.body).toBeUndefined();
+      expect(init?.headers).not.toHaveProperty('Content-Type');
+    });
+
+    it('surfaces the server envelope for a refused command', async () => {
+      const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: 'TABLE_BUSY',
+              message: 'The table already has an active job.',
+              requestId: 'r',
+              timestamp: '2026-01-01T00:00:00.000Z',
+            },
+          },
+          { status: 409 },
+        ),
+      );
+
+      const error = await client(fetchImpl)
+        .post('/jobs', {}, payloadSchema)
+        .catch((e: unknown) => e);
+
+      expect((error as ApiError).code).toBe('TABLE_BUSY');
+      expect((error as ApiError).status).toBe(409);
+    });
+
+    it('validates the response against the schema', async () => {
+      const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse({ nope: true }));
+
+      const error = await client(fetchImpl)
+        .post('/jobs', {}, payloadSchema)
+        .catch((e: unknown) => e);
+
+      expect((error as ApiError).kind).toBe('invalid-response');
+    });
+  });
 });

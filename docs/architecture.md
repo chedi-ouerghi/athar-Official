@@ -135,6 +135,25 @@ so a package can only find its own dependencies by walking up from its real
 location in the store. Disabling that lookup breaks transitive imports such as
 `@expo/metro-runtime`.
 
+**Contracts are consumed from source, except in production.**
+`@athar/contracts` declares a custom export condition, `athar-source`, that
+points at `src/index.ts` ahead of the compiled `dist/`:
+
+| Consumer                            | Mechanism                                                                                       | Needs `dist/`? |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- | -------------- |
+| `tsc` typecheck, IDE (API, mobile)  | `customConditions: ["athar-source"]` in the app's `tsconfig.json`                               | No             |
+| Vitest (API, mobile)                | `resolve.alias` to `packages/contracts/src/index.ts`                                            | No             |
+| Metro                               | `resolveRequest` in `metro.config.js` maps the package to its source (and `./x.js` to `./x.ts`) | No             |
+| API build (`tsconfig.build.json`)   | `customConditions: []`: resolves to the compiled declarations, so `rootDir` stays `src`         | Yes            |
+| API at runtime (dev and production) | Node loads the compiled `dist/index.js`                                                         | Yes            |
+
+Production is therefore unchanged: `pnpm build` builds contracts first
+(`pnpm -r` follows the dependency order), then the API against its declarations.
+The dev server needs `dist/` only because Node 20 cannot run TypeScript; the
+contracts watcher in `pnpm dev` keeps it fresh. The condition name is
+deliberately specific: a generic `source` condition would also switch any
+third-party package that defines one.
+
 The root `eslint.config.js` is the single lint entry point. Rules are scoped by
 file type rather than duplicated per package, which keeps the mobile app, the
 API and the shared packages from drifting apart.
@@ -156,7 +175,11 @@ form is used below.
 ## Blocking pre-work
 
 These defects from [gap-analysis.md](gap-analysis.md) sit directly under the
-target design and must be fixed first, or the design cannot be verified:
+target design and must be fixed first, or the design cannot be verified.
+**Status: fixed** (gaps 3.1, 3.2, 3.3, 3.5 and 3.6, and the filter part of the
+error-code work); how is described under
+[Monorepo mechanics](#monorepo-mechanics) and in
+[development-setup.md](development-setup.md).
 
 | Gap                                             | Why it blocks this design                                                     |
 | ----------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -341,10 +364,19 @@ export type DriverEvent = DriverStatus;
 
 export type Unsubscribe = () => void;
 
-export interface StartJobRequest {
+/**
+ * Named for the driver side, to keep it apart from `StartJobRequest` in
+ * `@athar/contracts`, which is the HTTP request body.
+ */
+export interface DriverStartRequest {
   /** Chosen by the API; the driver echoes it in every status it emits. */
   readonly jobId: string;
   readonly trajectory: Trajectory; // see section 3
+  /**
+   * How long the drawing is expected to take. The simulator paces itself with
+   * it; a hardware driver ignores it. Optional: the simulator falls back to 60 s.
+   */
+  readonly estimatedDurationSeconds?: number;
 }
 
 export interface TableDriver {
@@ -354,7 +386,7 @@ export interface TableDriver {
   getStatus(tableId: string): Promise<DriverStatus>;
 
   /** Resolves once the table has accepted the job. Rejects with `DriverError`. */
-  startJob(tableId: string, request: StartJobRequest): Promise<void>;
+  startJob(tableId: string, request: DriverStartRequest): Promise<void>;
 
   pause(tableId: string, jobId: string): Promise<void>;
   resume(tableId: string, jobId: string): Promise<void>;
@@ -393,15 +425,31 @@ Rules for every implementation:
 
 - A pure state machine per table driven by an **injectable `Clock`**. Progress
   is a function of `elapsed = now - startedAt - pausedTotal` divided by
-  `estimatedDuration / SIMULATION_SPEED_FACTOR`. There are no per-job timers to
-  leak across tests; one injectable scheduler tick re-evaluates active tables
-  and notifies subscribers.
+  `estimatedDurationSeconds / SIMULATION_SPEED_FACTOR` (the duration comes from
+  `DriverStartRequest`; 60 s if it is absent). The simulated table moves at a
+  constant speed along the path, so elapsed fraction is path-length fraction.
+  There are no per-job timers to leak across tests; one injectable scheduler
+  tick (every 250 ms) re-evaluates active tables and notifies subscribers.
+  Completion and injected faults are noticed lazily, on the next command,
+  `getStatus` or tick after the clock reaches them.
+- Events are delivered in the order the changes happened, even if a listener
+  calls back into the driver, and a throwing listener is logged and ignored.
 - Fault injection for the error path is configuration, not a request parameter:
   `SIMULATION_FAULT_EVERY_NTH_JOB` and `SIMULATION_FAULT_AT_PROGRESS`. A faulted
   job ends with `SIMULATED_FAULT`. The same inputs always give the same outcome.
-- The simulator keeps state for every table registered in the repository and
-  reports it `online`. The `offline` path is exercised in tests through a
-  test-only control on the driver, with tables from test fixtures.
+  "Every Nth job" counts accepted jobs across all tables, and a faulted job never
+  reaches progress 1 (a fault asked for at 1 happens at 0.999), because a job's
+  progress is 1 if and only if it completed.
+- The simulator keeps state for any table id it is asked about (there is no
+  table registry yet; the `tables` module will decide which ids exist) and
+  reports it `online`. The `offline` and `error` paths are exercised in tests
+  through `simulateConnection`, a test-only control that is not part of
+  `TableDriver`. Taking a table offline or into error fails a job in progress
+  with `OFFLINE` or `FAULT`.
+- A command that names a job the table is not running, or that its phase does
+  not allow (pausing a finished job), throws `InvalidDriverCommandError`, not
+  `DriverError`: the job state machine should have prevented it, so it is a
+  programming error, not an outcome a job can end with.
 - State is in memory. An API restart forgets a running simulated drawing; the
   app treats `404` for a known job id as a normal state
   ([section 7](#7-mobile-app-structure)).
@@ -529,8 +577,16 @@ interface Trajectory {
   motion for polar kinematics, which keeps radial and circular moves exact.
 - Progress is cumulative polar path length up to the current position divided by
   total path length.
-- Designs should start and end at agreed rho values so consecutive jobs chain.
-  The values depend on the mechanics and are not decided here.
+- Designs must start and end at the **same** rho, so that any design can follow
+  any other, and the same one can repeat, without a jump. The value depends on
+  the mechanics (where the ball can rest) and is **not decided**. It is a single
+  named constant, `HOME_RHO` in `apps/api/src/designs/home.ts`, set to the
+  centre (0) for now: at the centre the angle is meaningless, so chaining is
+  continuous whatever angle the last drawing stopped at, whereas at the rim the
+  end angle of one design would have to equal the start angle of the next. Every
+  design is validated against it at startup. Because the shipped designs are
+  drawn as out-and-back paths that return to the centre, choosing the rim means
+  redrawing them, not only changing the constant.
 
 Why this and not the alternatives: G-code is controller-specific, so it would
 put one protocol into the data and into the interface. Cartesian XY suits a
@@ -554,13 +610,23 @@ so far. It gets this from `previewPath`, not from the trajectory:
   designs are validated, and kept in memory. It is never authored by hand, so it
   cannot drift from the design it previews. Startup fails if a design yields
   fewer than 2 points.
-- Downsampling **resamples at roughly equal path-length intervals** and always
-  keeps the first and last point, rather than dropping every Nth point. That
-  keeps the preview's own path length proportional to the real one, which the
-  progress rule below depends on. A preview is an approximation: chords between
-  resampled points are slightly shorter than the real curve, so the drawn-so-far
-  overlay can differ from the real position by a small amount. It is a display
-  aid, not a measurement.
+- The reduction is **tolerance-based simplification** (Douglas-Peucker), not
+  even spacing. Every preview point is a point of the trajectory itself, in its
+  own unwrapped convention; the first and last are always kept; the tolerance is
+  the smallest that fits the 500-point budget, so the preview is as faithful as
+  the budget allows, and a trajectory already short enough is returned whole.
+  _Even path-length spacing was tried first, as this section originally
+  specified, and measured worse:_ on a design built of straight strokes and sharp
+  turns the corners fall between samples and are cut off (the palm-fronds
+  preview came out 21% shorter than the design), and the tight turns near the
+  centre of a spiral are under-sampled. Simplification keeps exactly the points
+  that matter. For the shipped designs the worst a dropped point strays from the
+  preview is 0.7% of the table radius (the dunes, which use the whole budget) or
+  less (the star and the fronds are exact), and the preview's length is within
+  2% of the design's.
+- The preview is still an approximation, and its path length is only
+  approximately the real one, so the drawn-so-far overlay can differ from the
+  true position by a small amount. It is a display aid, not a measurement.
 - The full trajectory stays API-internal. `previewPath` must never be sent to a
   driver.
 - **Drawn part.** The app shows the part of the path drawn so far by taking the
@@ -569,8 +635,10 @@ so far. It gets this from `previewPath`, not from the trajectory:
   rule the driver uses** for progress (cumulative path length over total path
   length, section 2), applied to a coarser path. Both sides must use one shared
   definition of "path length" (including how a polar-linear segment is
-  measured); where that function lives (proposal: `packages/contracts`, as pure
-  data-in/data-out code) is settled when it is written.
+  measured). **As built:** it lives in `packages/contracts/src/polar-path.ts`
+  (`polarSegmentLength`, `cumulativePathLengths`, `polarPathLength`,
+  `locateAlongPath`), pure data-in/data-out; the API's `trajectory.ts` re-exports it
+  and the app's preview geometry uses it, so there is one definition.
 
 ### DrawingJob
 
@@ -670,6 +738,70 @@ The API keeps `(tableId, clientRequestId) -> jobId` for the retained history.
 - A new `clientRequestId` while the table is busy: `TABLE_BUSY`.
 
 The app generates a fresh id for each deliberate "draw again".
+
+### As built: the drawing-jobs module
+
+`apps/api/src/jobs/`. `JobsModule.forRoot` is global and provides
+`ACTIVE_JOB_LOOKUP`, the seam `tables` was built with, so `tables` still imports
+nothing from `jobs`.
+
+| Piece                   | Role                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `job-state-machine.ts`  | The pure state machine, over the transition **data** in `@athar/contracts`. No I/O, no clock, changes nothing it is given            |
+| `JobRepository`         | The storage interface; `insertIfNoActive` decides repeat and busy atomically                                                         |
+| `InMemoryJobRepository` | Jobs in memory, bounded per table. Lost on restart                                                                                   |
+| `JobsService`           | **The only writer of job state.** Starts jobs, runs commands, listens to the driver and applies each event through the state machine |
+| `TableJobsController`   | `POST` and `GET /api/v1/tables/:tableId/jobs`                                                                                        |
+| `JobsController`        | `GET /api/v1/jobs/:jobId`, and `POST .../pause`, `.../resume`, `.../stop`                                                            |
+
+How it behaves, including the choices the sections above leave open:
+
+- **Driver events are turned back into transitions.** A driver reports what the
+  table is doing ("paused"); the service maps that to a job state and finds the one
+  trigger that joins the job's state to it (`pause`, `driver-completed`, ...).
+  Every pair of states has at most one trigger, so there is never a choice. A report
+  the machine has no transition for (a queued job "paused", a paused job
+  "completed") is logged at warn level and ignored. A finished job never changes.
+- **Commands are judged against fresh state.** Before a command, the driver is asked
+  what the table is actually doing and the job is brought up to date, so a stop that
+  arrives after the drawing has in fact ended is `INVALID_TRANSITION` ("Cannot stop
+  a job that is completed."), not a stop of a finished drawing. After the driver has
+  accepted the command, its state is read back; if the driver's status has not caught
+  up, the command's own trigger is applied.
+- **One order for everything that changes a job.** Commands, starts and driver events
+  all run one at a time, in order. A driver event that arrives while a command is
+  running waits behind it and then finds the work done. The repository is _also_
+  atomic where it decides busy and repeat requests, so correctness does not rest on
+  this alone (a test proves a hundred simultaneous starts yield exactly one job).
+- **A start the driver refuses.** The job exists and is `failed` with the driver's
+  code (`BUSY`, `OFFLINE`, `TRAJECTORY_REJECTED`, ...), and **`POST` returns it with
+  `201`**, so the app shows it like any other failure. An _unexpected_ driver error
+  also fails the job (`FAULT`), so that it can never hold the table, and is then
+  rethrown as a server error.
+- **Reads do not touch the driver.** `GET /jobs/:jobId` reports what the service
+  last learnt. The simulator announces progress every 250 ms, so a poll is at most
+  that stale. Only commands ask the driver directly.
+- **`activeJobId` and busy** now come from this module. A table with an active job
+  is `busy` even if the driver, not yet caught up, still says `online`; an
+  `offline` or `error` table is never reported as busy.
+- **Pause, resume and stop on a disabled table are allowed.** Disabling a table
+  refuses _new_ jobs only; an operator who switches a table off must not strand a
+  visitor's running drawing.
+- **`limit` on the history is not rejected for being above `JOB_HISTORY_LIMIT`.**
+  The contract allows 1 to 100 and the response holds what is retained, so a client
+  can always ask for 100.
+- **Jobs do not survive a restart, and the dev server restarts on every save.** In
+  `pnpm dev:api` a saved file restarts the API, which forgets every job; the app must
+  treat `JOB_NOT_FOUND` for a job it knows as a normal state (section 7), and a
+  developer should expect it. (An earlier version of the dev loop also restarted the
+  API a few seconds _after_ it first answered, because the watcher's first emit
+  rewrote `dist`. Found by running the journey by hand, fixed with incremental builds;
+  see development-setup.md.)
+- **Logging.** Each job is logged by id, table, design and mode when it is queued,
+  and once for each change of state (`Job <id> on table <tableId>: drawing ->
+paused`). Progress-only updates are not logged. A job carries no personal data and
+  neither does its log: the client's request id is not logged, and neither is
+  anything about the caller.
 
 ## 5. REST API v1
 
@@ -819,6 +951,12 @@ five fields and nothing else. The simulator status is added to **`/ready`**:
 This is a deliberate, small widening of the "health exposes nothing" rule, made
 because the requirement is to see simulator status. It is listed in
 [Open decisions](#9-open-decisions). The mobile diagnostics screen displays it.
+
+**As built:** `HealthService` injects the driver and the table registry, and the
+probe is `ok` when the driver answers `getStatus` for every registered table. A
+failing probe returns only its name and status; which table failed, and why, is for
+the logs. A new installation with no tables is ready. `tableMode` is read from the
+driver, not from configuration. `/health` is byte-for-byte what it was.
 
 ### Progress delivery
 
@@ -1051,6 +1189,71 @@ never nothing, and no text describes a drawing as physical unless
 `mode === 'hardware'`. In simulation mode the result reads "Simulated drawing
 completed".
 
+### As built: the mobile app
+
+Everything in sections 6 and 7 that concerns the first journey is implemented;
+what follows records the choices the sections above leave open.
+
+- **Structure.** `src/app` holds thin route files (read the params, call the
+  router); each screen is a component in `src/features/<area>/` that takes its
+  navigation as props, so it renders under test without a router. Paths are built
+  only in `src/navigation/routes.ts`. `useResource` (one read, aborted on unmount)
+  backs `useTable`, `useDesigns` and `useDesign`; `useJob` polls; `useStartJob` owns
+  the idempotency id.
+- **Links.** `src/app/+native-intent.ts` runs every incoming URL through
+  `parseTableLink`, then opens `/t/<id>`; anything else is left to the router.
+  HTTPS associated domains and Android intent filters are generated in
+  `app.config.ts` from `EXPO_PUBLIC_TABLE_LINK_HOSTS` and are absent while it is
+  empty. Expo Go registers neither the scheme nor any domain: in Expo Go a table
+  opens by scanning in the app or typing its code.
+- **Typed code.** "Enter table code" accepts a table id or a pasted link and uses the
+  same parser as the scanner.
+- **Table screen.** Designs are offered only when the table is enabled and `online`;
+  otherwise the reason is shown (switched off, offline or in error, busy with a button to
+  open `activeJobId`). The list endpoint has no previews, so each design card fetches its
+  design detail for the picture (open decision 7: lazy detail fetches); a failed fetch
+  leaves the card without a picture. An invalid id and `TABLE_NOT_FOUND` are both "table
+  not found".
+- **Starting.** The design screen waits for the design and the table (for the badge).
+  After `TABLE_BUSY` it reloads the table to learn `activeJobId`. A start the driver
+  refuses comes back as a `failed` job (`201`), so it opens the progress screen, which
+  hands straight over to the result. The design and result screens leave with `replace`
+  / `navigate`, so Back from progress is the table and "Draw again" opens a fresh design
+  screen with a fresh `clientRequestId`.
+- **Progress.** `useJob` fetches at once, then after each answer waits one
+  `EXPO_PUBLIC_POLL_INTERVAL_MS`; every consecutive failure doubles the wait up to 15 s;
+  the last known job stays on screen with a notice. It stops at a terminal state, and is
+  inactive while the screen is unfocused or the app is not in the foreground (the
+  request in flight is aborted, polling resumes at once on return). A failure that
+  retrying cannot fix (not a connection or 5xx error) ends polling with an error and a
+  retry button. `JOB_NOT_FOUND` is its own state with a way back to the table.
+- **Result.** Wording is chosen from the job's state and mode, fail-closed like the badge:
+  "Simulated drawing completed" for `simulation`, plain "Drawing completed" for
+  `hardware`, and for any other mode wording that claims neither. A failed job gives the
+  reason its error code names (a simulated fault says it was simulated).
+- **Languages.** `en` and `ar` files under `src/i18n`; the device language by default
+  (English if it is neither), a switch on the home screen, the choice saved in a small
+  file through `expo-file-system`. Switching text is immediate. **Layout direction is
+  fixed by the native layer when the app starts**: the app calls `I18nManager.forceRTL`
+  (and `allowRTL` to the same value), which is stored natively and applies on the next
+  launch. A development build restarts itself (`DevSettings.reload`); a release build has
+  no restart API without `expo-updates`, so it shows "Close and reopen the app to finish
+  changing the language." until then.
+- **Visual language.** Warm sand surfaces, a deep ink for text, bronze for actions and a
+  restrained gold for ornament (tokens in `src/theme.ts`; the contrast of every
+  text/background pair and of a drawing on its disc is asserted in `theme.spec.ts`).
+  Designs are shown on a round, softly lit **sand disc** with a gold rim, the shape of the
+  table; the progress screen traces progress as a gold arc around that rim. Cards use wide,
+  low-opacity shadows and hairline borders, a gold bar marks a card's start edge, and the
+  home screen carries a generated spiral ornament and the name in Latin and Arabic. Motion
+  is limited to a short fade-and-rise on entry, a breathing spiral while loading and a
+  small press response, all vertical or scale-only so they read the same in both
+  directions, and all switched off when the system's "reduce motion" setting is on. Icons
+  are small stroked SVG paths (`Icon.tsx`); only the chevron mirrors in right-to-left. The
+  wordmark alone is letter-spaced, and only in Latin: tracking breaks Arabic joins.
+- **Native header.** Screens show the native header with only a back arrow (titles are in
+  the content); the home screen has none.
+
 ## 8. Persistence, configuration and deployment
 
 ### Persistence
@@ -1281,13 +1484,55 @@ decision 2) they can start, pause and stop jobs on it. In this milestone the
 table is simulated, so that is a nuisance; it must be solved before any hardware
 driver.
 
+### As built: the tables module
+
+`apps/api/src/tables/` holds the module; `TablesModule.forRoot(options)` is
+imported by `AppModule.forRoot(config, tables)`, which receives an
+**already-opened** repository.
+
+| Piece                     | Role                                                                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TableRepository`         | The storage interface (`list`, `get`, `create`, `update`) and its `TABLE_REPOSITORY` token                                                                                         |
+| `JsonFileTableRepository` | Production store: Zod-validated on load, atomic writes, writer lock                                                                                                                |
+| `InMemoryTableRepository` | Tests only; one shared contract suite runs against both implementations                                                                                                            |
+| `TableRegistry`           | The admin operations (create, list, get, update, link). Used by the admin controller **and** the `table:create` command                                                            |
+| `TablesService`           | The public view of a table: registration data plus `mode`/`connection` read from the driver on every request                                                                       |
+| `AdminKeyGuard`           | The `ADMIN_API_KEY` check, applied to the whole admin controller                                                                                                                   |
+| `ACTIVE_JOB_LOOKUP`       | **The seam to jobs.** `tables` knows only this one-method interface; `NoActiveJobs` answers `null` until the jobs module provides the real one, so `activeJobId` is `null` for now |
+
+Behaviours worth knowing:
+
+- The admin guard accepts `Authorization: Bearer <key>` with the scheme in any
+  letter case (as HTTP defines it) and a single non-blank token. It runs
+  **before** validation, so an unauthenticated caller learns nothing about what a
+  valid request looks like, and it sets `WWW-Authenticate: Bearer` itself.
+- An unknown path under `/api/v1/admin` is an ordinary `404`: the guard is
+  attached to the routes that exist, so it does not hide which admin routes exist.
+- `GET /api/v1/tables/:tableId` reads `mode` and `connection` from the driver on
+  every request (never stored). A table the driver has never heard of is reported
+  `online`, which is the simulator's behaviour for any id. A disabled table is
+  returned with `enabled: false`.
+- `PUBLIC_LINK_BASE_URL` must be an **origin only** (no path, query, fragment or
+  credentials); a trailing slash is normalised away. `http` is accepted outside
+  production for LAN testing.
+- Public and admin ids are validated with the shared `tableIdSchema`; a bad id is
+  `VALIDATION_FAILED` with the path `params.tableId`.
+
 ### QR generation CLI
 
-A script in `apps/api`, run on an administrator's machine:
+Two commands in `apps/api`, run on an administrator's machine. Both rebuild the API first (`tsc`), so they never run stale code:
 
 ```
+pnpm --filter @athar/api table:create --name <text> --location <text> [--disabled]
 pnpm --filter @athar/api table:qr <tableId> [--out <dir>] [--no-verify]
 ```
+
+`table:create` registers a table through the same `TableRegistry` service the
+admin endpoint uses (same validation, same server-generated id), so a table can
+be provisioned without `curl`. It writes the tables file, so it takes the writer
+lock below: **while the API is running it refuses**, with a message saying to stop
+the API or use the admin endpoint, rather than silently losing a change.
+`table:qr` only reads, takes no lock, and is safe to run while the API runs.
 
 - Builds the link `PUBLIC_LINK_BASE_URL/t/<tableId>`, validates the id with the
   shared table-id schema, and by default checks that the table exists in
@@ -1300,7 +1545,7 @@ pnpm --filter @athar/api table:qr <tableId> [--out <dir>] [--no-verify]
   scuffed or partly covered sticker still scans), a quiet zone of 4 modules (the
   QR standard minimum), black on white, SVG for print production and a PNG of
   at least 1024 px for convenience.
-- **Library (proposal): [`qrcode`](https://www.npmjs.com/package/qrcode)**, one
+- **Library: [`qrcode`](https://www.npmjs.com/package/qrcode) 1.5.4**, one
   dependency plus `@types/qrcode`, in `apps/api` only. Why: it is the most widely
   used QR package for Node, written in plain JavaScript with no native build
   step (so it installs the same on every machine, which matters because the
@@ -1308,12 +1553,18 @@ pnpm --filter @athar/api table:qr <tableId> [--out <dir>] [--no-verify]
   strings and PNG files from one API, and it exposes error-correction level and
   margin explicitly. Alternatives considered: `qr-image` (older, less
   maintained), `qrcode-generator` (tiny, but SVG and PNG output need extra
-  code), and browser-oriented libraries that need a canvas. **To verify before
-  installing:** current release date and maintenance status, and the license of
-  `qrcode` and its dependencies (the dependency list is the cost of PNG
-  support). Decision 20.
-- The script reuses the API's config loader and repository, and contains no
-  second copy of the id or link rules.
+  code), and browser-oriented libraries that need a canvas.
+  **Verified before installing (2026-10-11, `npm view`):** licence **MIT**
+  (`pngjs` and `dijkstrajs` MIT as well); not deprecated; no advisory found by
+  `npm audit`; about 29.8 million downloads in the last week. The costs: the
+  **last release was August 2024**, so it is stable but not actively developed,
+  and it depends on `yargs@^15`, an old major used only by its own command line
+  tool, so 18 transitive packages were added. Neither blocks use; revisit if a
+  vulnerability is ever reported against it. Decision 20.
+- The commands reuse the API's config loader, repository and `TableRegistry`,
+  and contain no second copy of the id or link rules. PNG size is a whole number
+  of pixels per module, rounded up, so it is always at least 1024 px (1025 px for
+  a typical link).
 
 ### Table persistence: JSON file
 
@@ -1338,8 +1589,10 @@ named by `TABLES_DATA_FILE`.
 
 - **Validated on load** with Zod (`version`, unique ids, each record against the
   admin table schema). A corrupt or unknown-version file **fails startup** with a
-  readable error and is never overwritten. A missing file is an empty store and
-  is created on the first write; its directory must exist.
+  readable error and is never overwritten. A missing file is created, empty,
+  **at startup** (with its directory, `mkdir -p` style, so the default
+  `./data/tables.json` works on a fresh checkout), which also proves early that
+  the location is writable. Read-only opens (the QR command) create nothing.
 - **Atomic writes.** Every mutation serialises the full document, writes it to a
   temporary file **in the same directory** (`tables.json.<pid>.tmp`), flushes it
   to disk (`fsync`), then **renames it over the real file**. A crash leaves
@@ -1350,13 +1603,27 @@ named by `TABLES_DATA_FILE`.
   reported as failed.
 - **One writer.** Writes go through an in-process queue (one at a time), and the
   in-memory copy is replaced only after the rename succeeded, so a failed write
-  leaves memory and disk in agreement. The file is only safe for a **single API
-  instance**; a second instance would silently overwrite changes. That, plus no
-  querying and no migrations, is why PostgreSQL is an open decision (19).
+  leaves memory and disk in agreement. The file is only safe for a **single
+  writing process**; a second one would silently discard the first one's changes.
+  That, plus no querying and no migrations, is why PostgreSQL is an open decision
+  (19).
+- **Writer lock.** To make that rule enforced rather than hoped for, a writer
+  holds `<file>.lock` (containing its pid) while it is open, released when the
+  application closes. A second writer, such as `table:create` run while the API
+  is up, fails with a message naming the process that holds it. A lock left by a
+  process that no longer exists (a crash or a forced kill) is taken over
+  automatically; a lock file that names no process is refused with an instruction
+  to delete it. Read-only opens take no lock.
 - The file holds registration data only: no secrets, no personal data, no
   jobs. It is not exposed over HTTP. Back it up with the rest of the
   deployment's persistent storage.
-- Reads are served from memory. The CLI reads the file directly and read-only.
+- Reads are served from memory. The QR command reads the file directly and
+  read-only; because the file is only ever replaced by an atomic rename, it always
+  sees a complete document.
+- The application opens the repository **before** Nest starts
+  (`createConfiguredApp`), so a corrupt file stops the process with a readable
+  message instead of a Nest initialisation failure, and releases the lock if
+  anything later in startup fails.
 - `InMemoryTableRepository` (seeded from test fixtures) implements the same
   interface, so every test runs against the real services without touching disk,
   and one shared test suite runs against both implementations.
@@ -1368,14 +1635,14 @@ requirement.
 
 | #   | Decision                            | Current proposal in this document                                                                                                                                                                                                                                                                                                                                                                                                                    | Settled by           |
 | --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| 1   | Trajectory format                   | `polar-theta-rho/v1`: unwrapped theta, rho normalised to table radius, polar-linear interpolation                                                                                                                                                                                                                                                                                                                                                    | Mechanics choice     |
+| 1   | Trajectory format                   | **Home radius (provisional): the centre, `HOME_RHO = 0`.** `polar-theta-rho/v1`: unwrapped theta, rho normalised to table radius, polar-linear interpolation                                                                                                                                                                                                                                                                                         | Mechanics choice     |
 | 2   | Access control                      | Public endpoints: none in this milestone; simulation only; mandatory before any hardware driver. (Admin endpoints are protected by `ADMIN_API_KEY`; see decision 18.) Candidates: pairing proof at the table, signed rotating QR, accounts. **Without access control, any visitor can pause or stop another visitor's drawing** (see decision 10); this must be addressed together with access control, not separately                               | Product and security |
 | 3   | Hosting and domain                  | A static install page and `.well-known` files on one HTTPS domain; where the API is hosted is not decided. The domain is also `PUBLIC_LINK_BASE_URL`, baked into every printed QR code, so it must be stable for the life of the products                                                                                                                                                                                                            | Product and ops      |
 | 4   | Real-time transport                 | Poll `GET /jobs/:jobId` about once per second; SSE or WebSocket later, fed by `drawing-jobs`                                                                                                                                                                                                                                                                                                                                                         | After measuring      |
 | 5   | Hardware transport                  | **Decided:** the command path is phone → backend (over the internet) → table controller, with the simulator standing in for the controller for now; the table connects to the backend over the network and the phone is never in the path. **Open:** the controller hardware, the protocol between gateway and controller, and whether the gateway is its own process (proposed). Absent from the interface; owned by a future `HardwareTableDriver` | Mechanics choice     |
 | 6   | Table id format                     | **Decided:** server-generated, random (80 bits), immutable, matching `[a-z0-9-]{3,40}`; public, non-secret                                                                                                                                                                                                                                                                                                                                           | Product              |
 | 7   | Design preview                      | The detail response carries `previewPath` (at most ~500 `[theta, rho]` points, derived from the trajectory at startup, polar-theta-rho/v1); the app draws it with `react-native-svg` and reuses it on the progress screen to show the drawn part up to `job.progress`. Open sub-questions: thumbnails for the table screen's cards (lazy detail fetches vs `previewPath` in the list), and verifying `react-native-svg` in Expo Go                   | Product and design   |
-| 8   | Design content and provenance       | Shape only. Titles, notes, sources and the "documented traditional" or "original modern" label are authored and reviewed by the owner                                                                                                                                                                                                                                                                                                                | Product owner        |
+| 8   | Design content and provenance       | **A first draft of all four designs now exists, for the owner's review: [designs.md](designs.md).** Shape only. Titles, notes, sources and the "documented traditional" or "original modern" label are authored and reviewed by the owner                                                                                                                                                                                                            | Product owner        |
 | 9   | Health extension                    | Simulator status on `/ready` (`tableMode`, `table-driver` probe); `/health` unchanged. Widens the "health exposes nothing" rule slightly                                                                                                                                                                                                                                                                                                             | Product and ops      |
 | 10  | A second visitor to a busy table    | Sees `activeJobId` and may open, pause, resume or stop that job (no ownership concept)                                                                                                                                                                                                                                                                                                                                                               | Product              |
 | 11  | Simulator fault policy              | Deterministic every-Nth-job and at-progress, set by configuration                                                                                                                                                                                                                                                                                                                                                                                    | Product              |
@@ -1387,6 +1654,6 @@ requirement.
 | 17  | Languages                           | English and Arabic from the start; RTL-ready layouts; UI strings in translation files; design text localised as `{ en, ar }` (title, description, inspiration note). Open: localising table `displayName`/`location` and source labels, which language is the default, and who writes and reviews the Arabic content                                                                                                                                 | Product              |
 | 18  | Real admin accounts                 | `ADMIN_API_KEY` is a shared secret with no identity, audit trail or per-person revocation; rotation means a redeploy. Real accounts (individual admins, roles, audit log of who registered or disabled which table) replace it before more than a handful of operators exist                                                                                                                                                                         | Product and security |
 | 19  | Production database (PostgreSQL)    | Tables in a JSON file (single instance, atomic rename), jobs in memory, for this milestone. PostgreSQL is the expected production store (multi-instance, queries, migrations, job history that survives restarts); retention, backup and migration policy settled first, as in `future-infrastructure-decisions.md`. The repository interfaces are the seam                                                                                          | Product and ops      |
-| 20  | QR library and artwork              | `qrcode` (plain JavaScript, SVG and PNG from one API), level Q, 4-module quiet zone; licence and maintenance to verify before installing. Branded or logo-bearing codes are not proposed, because a logo costs error-correction capacity                                                                                                                                                                                                             | Product and design   |
+| 20  | QR library and artwork              | `qrcode` (plain JavaScript, SVG and PNG from one API), level Q, 4-module quiet zone; licence (MIT) and maintenance (last release August 2024) verified, see "QR generation CLI". Branded or logo-bearing codes are not proposed, because a logo costs error-correction capacity                                                                                                                                                                      | Product and design   |
 | 21  | Admin exposure and abuse protection | Admin routes share the public host and port and rely on a 32+ character key alone. Open: serving them on a separate host or port, an IP or network allow-list, rate limiting (also needed publicly), and key rotation                                                                                                                                                                                                                                | Product and ops      |
 | 22  | Table retirement                    | No delete endpoint: a table is disabled, because its QR code is already printed and jobs reference its id. Open: what a scan of a retired code should show, and whether ids are ever reissued (proposed: never)                                                                                                                                                                                                                                      | Product              |

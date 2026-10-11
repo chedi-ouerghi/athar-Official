@@ -8,6 +8,7 @@
  */
 
 import { z } from 'zod';
+import { tableModeSchema } from './device.js';
 
 /** Result reported by a health probe. */
 export const healthStatusSchema = z.enum(['ok', 'error']);
@@ -44,10 +45,14 @@ export type ReadinessCheck = z.infer<typeof readinessCheckSchema>;
  * Each entry reports only the name of the probe and whether it passed. Probe
  * output (connection strings, host names, timings of internal calls) is
  * deliberately excluded from the response body and kept in server logs.
+ *
+ * `tableMode` says whether the API is driving a simulated or a physical table.
+ * It names the mode and nothing else: no seed data, durations or fault settings.
  */
 export const readyResponseSchema = z.object({
   ...probeBase,
   service: z.string(),
+  tableMode: tableModeSchema,
   checks: z.array(readinessCheckSchema),
 });
 export type ReadyResponse = z.infer<typeof readyResponseSchema>;

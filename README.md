@@ -1,11 +1,21 @@
 # ATHAR
 
-Infrastructure foundation for ATHAR: an Expo mobile application and a NestJS
-backend, in a single pnpm workspace.
+ATHAR: an Expo mobile application and a NestJS backend, in a single pnpm
+workspace. A visitor scans the QR code on a sand table, browses four designs,
+starts a drawing, watches it progress, and can pause, resume or stop it. The table
+is **simulated**: no hardware driver exists yet, and the app says "Simulation" on
+every screen that shows a table or a drawing.
 
-This repository currently contains **no product features**. Its purpose is to
-provide a reproducible, verifiable base on which the product can be built
-without re-litigating tooling, networking or configuration.
+## Status
+
+Verified on an Android emulator against a real API process (details and what was
+**not** observed in [docs/testing.md](docs/testing.md#verified-manually)): open a table,
+browse the four designs, start, pause, resume, complete and draw again; stop with
+confirmation; an injected fault; an unknown table; a disabled table; a second start
+while busy; the API stopped and restarted mid-drawing. English and Arabic are
+implemented. Not yet verified: scanning a QR code with the camera, a physical phone,
+iOS, and the Arabic layout on a device. Nothing is deployed; see
+[docs/deployment.md](docs/deployment.md).
 
 ## Requirements
 
@@ -25,7 +35,7 @@ network, not to the phone, so no BLE or serial module is planned — see
 
 ```bash
 pnpm install          # also builds @athar/contracts
-pnpm dev              # runs the API and the Expo dev server together
+pnpm dev              # API + contracts watcher + Expo dev server together
 ```
 
 To run one side at a time:
@@ -43,9 +53,10 @@ curl http://localhost:3000/ready
 ```
 
 Open the app on an Android emulator with `pnpm --filter @athar/mobile android`.
-The startup screen shows the resolved API address and whether the backend
-answered its liveness probe. It renders and stays usable when the backend is
-offline.
+To try the whole journey (provision a table, make its QR code, scan it), follow
+[docs/development-setup.md](docs/development-setup.md#try-it-in-expo-go-on-a-phone).
+The "Connection details" link on the home screen shows the resolved API address,
+whether the backend answers, and its table mode.
 
 ## Workspace layout
 
@@ -63,20 +74,23 @@ docs/
 
 Run from the repository root.
 
-| Command             | Description                                    |
-| ------------------- | ---------------------------------------------- |
-| `pnpm dev`          | Run API and mobile dev servers together        |
-| `pnpm dev:api`      | Run only the API (watch mode)                  |
-| `pnpm dev:mobile`   | Run only the Expo dev server                   |
-| `pnpm build`        | Type-check and build every package             |
-| `pnpm typecheck`    | Type-check every package                       |
-| `pnpm lint`         | Lint every package                             |
-| `pnpm lint:fix`     | Lint and apply auto-fixes                      |
-| `pnpm format`       | Format the repository with Prettier            |
-| `pnpm format:check` | Verify formatting without writing              |
-| `pnpm test`         | Run all unit and HTTP integration tests        |
-| `pnpm check`        | `format:check` + `lint` + `typecheck` + `test` |
-| `pnpm clean`        | Remove build output                            |
+| Command             | Description                                      |
+| ------------------- | ------------------------------------------------ |
+| `pnpm dev`          | Run API, contracts watcher and Expo together     |
+| `pnpm dev:api`      | Run the API (watch mode) and contracts watcher   |
+| `pnpm dev:mobile`   | Run only the Expo dev server                     |
+| `pnpm build`        | Type-check and build every package               |
+| `pnpm typecheck`    | Type-check every package                         |
+| `pnpm lint`         | Lint every package                               |
+| `pnpm lint:fix`     | Lint and apply auto-fixes                        |
+| `pnpm format`       | Format the repository with Prettier              |
+| `pnpm format:check` | Verify formatting without writing                |
+| `pnpm test`         | Run every package's tests, one package at a time |
+| `pnpm check`        | `format:check` + `lint` + `typecheck` + `test`   |
+| `pnpm clean`        | Remove build output                              |
+
+Tables are provisioned with `pnpm --filter @athar/api table:create` and `table:qr`;
+see [docs/development-setup.md](docs/development-setup.md#provision-a-table).
 
 `pnpm check` is the single command to run before pushing.
 
@@ -97,19 +111,23 @@ device** at a development machine, are in
 
 ## Documentation
 
-| Document                                                                           | Contents                                                      |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| [docs/architecture.md](docs/architecture.md)                                       | Module boundaries, dependency rules, request/response flow    |
-| [docs/development-setup.md](docs/development-setup.md)                             | Prerequisites and per-platform startup instructions           |
-| [docs/environment-configuration.md](docs/environment-configuration.md)             | Every environment variable and the device-address matrix      |
-| [docs/api-conventions.md](docs/api-conventions.md)                                 | Routing, versioning, validation and the error contract        |
-| [docs/testing.md](docs/testing.md)                                                 | Test layers, how to run them, what is deliberately not tested |
-| [docs/future-infrastructure-decisions.md](docs/future-infrastructure-decisions.md) | Deferred dependencies and the triggers for adding them        |
+| Document                                                                           | Contents                                                   |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| [docs/architecture.md](docs/architecture.md)                                       | Module boundaries, dependency rules, request/response flow |
+| [docs/development-setup.md](docs/development-setup.md)                             | Prerequisites and per-platform startup instructions        |
+| [docs/environment-configuration.md](docs/environment-configuration.md)             | Every environment variable and the device-address matrix   |
+| [docs/api-conventions.md](docs/api-conventions.md)                                 | Routing, versioning, validation and the error contract     |
+| [docs/testing.md](docs/testing.md)                                                 | Test layers, how to run them, what was verified by hand    |
+| [docs/deployment.md](docs/deployment.md)                                           | Production start, variables, storage, hosts, EAS profiles  |
+| [docs/future-infrastructure-decisions.md](docs/future-infrastructure-decisions.md) | Deferred dependencies and the triggers for adding them     |
 
 ## Scope
 
-Explicitly **out of scope** at this stage, and intentionally absent: product
-features, hardware drivers (BLE/Wi-Fi/serial), authentication, payments,
-databases, caches, queues, Docker, and CI/CD. Each is listed in
+Explicitly **out of scope** for now, and intentionally absent: hardware drivers
+(the table connects to the backend over the network, not to the phone),
+authentication and access control on the public endpoints, payments, a database
+(tables live in a JSON file, drawings in memory, so the API runs as a single
+instance), Docker, CI/CD and rate limiting. Each is listed in
 [docs/future-infrastructure-decisions.md](docs/future-infrastructure-decisions.md)
-together with the requirement that would justify introducing it.
+together with the requirement that would justify introducing it, and the open
+product decisions are in [docs/architecture.md](docs/architecture.md#9-open-decisions).

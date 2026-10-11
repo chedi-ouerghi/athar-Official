@@ -93,9 +93,34 @@ framework-generated ones: an unknown route, and a malformed JSON body. It also
 handles errors that never reached the Nest exception layer (body-parser
 failures), so those are not reported as server faults.
 
+**Throwing a domain error.** A domain failure throws `DomainException` with a
+contract code, and the filter reports that code verbatim with the status the
+code implies (`apps/api/src/common/http/domain.exception.ts`):
+
+```ts
+throw new DomainException('TABLE_BUSY', 'The table already has an active job.');
+```
+
+The status of every code is fixed in `ERROR_CODE_STATUS`, a complete
+`Record` over `ApiErrorCode`, so adding a code to `@athar/contracts` fails the
+API's type check until its status is decided. The message is sent to the client:
+never put internals in it. Framework errors (`NotFoundException`, a malformed
+body, a bare `HttpException`) keep their existing mapping, so a bare 409 is still
+`BAD_REQUEST`; only a `DomainException` can produce a domain code.
+
 **Internal errors never leak.** An unexpected exception is logged with its stack
 and answered with `An unexpected error occurred.` A raw message can embed file
 paths or connection strings.
+
+## Admin endpoints
+
+Everything under `/api/v1/admin` requires `Authorization: Bearer <ADMIN_API_KEY>`.
+Any failure to authenticate (no header, wrong scheme, wrong key, or a server with
+no key configured) is the same response: `401`, code `UNAUTHORIZED`, the message
+"Authentication is required.", and `WWW-Authenticate: Bearer`. The check runs
+before request validation. Throw `DomainException('UNAUTHORIZED', ...)` from any
+future guard in the same way. Public endpoints never return `UNAUTHORIZED`. See
+[architecture.md](architecture.md#admin-authentication).
 
 ## Correlation ids
 
@@ -125,8 +150,11 @@ dependency becomes readiness-relevant.
 - `authorization`, `cookie` and `x-request-id` header values are redacted by
   pino itself, so they cannot leak through a custom serialiser.
 - Health probes are excluded from automatic request logging.
-- Use the injected Nest logger rather than `console`, which the lint rules
-  forbid.
+- Application logs (everything written through Nest's `Logger`) go through
+  pino as well: the app is created with `bufferLogs` and `app.useLogger(...)`
+  in `bootstrap.ts`, so `LOG_LEVEL`, redaction and JSON output apply to them,
+  including the exception filter's lines.
+- Use Nest's `Logger` rather than `console`, which the lint rules forbid.
 
 ## Request limits
 

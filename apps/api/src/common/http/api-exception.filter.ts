@@ -14,6 +14,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { ApiErrorCode, ApiErrorDetail } from '@athar/contracts';
 import { ValidationFailedException } from '../validation/validation-failed.exception.js';
+import { DomainException } from './domain.exception.js';
 
 /**
  * Minimal structural view of the Express response.
@@ -132,6 +133,16 @@ function readForeignStatus(error: unknown): number | undefined {
 
 /** Map an exception onto status, contract code, message and field details. */
 function normalise(exception: unknown): NormalisedError {
+  // A domain failure already knows its contract code; report it verbatim
+  // rather than deriving a coarser one from the HTTP status.
+  if (exception instanceof DomainException) {
+    return {
+      status: exception.getStatus(),
+      code: exception.code,
+      message: readMessage(exception.getResponse(), exception.message),
+    };
+  }
+
   if (exception instanceof ValidationFailedException) {
     return {
       status: exception.getStatus(),

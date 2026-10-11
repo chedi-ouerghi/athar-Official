@@ -8,8 +8,8 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "dev": "pnpm --parallel --stream --filter \"./apps/*\" dev",
-    "dev:api": "pnpm --filter @athar/api dev",
+    "dev": "pnpm --parallel --stream --filter @athar/api --filter @athar/contracts --filter @athar/mobile dev",
+    "dev:api": "pnpm --parallel --stream --filter @athar/api --filter @athar/contracts dev",
     "dev:mobile": "pnpm --filter @athar/mobile start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
@@ -17,7 +17,7 @@
     "lint:fix": "pnpm -r lint:fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm -r test",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "clean": "pnpm -r clean"
   },

@@ -14,6 +14,10 @@
 import { apiErrorResponseSchema, type ApiErrorCode } from '@athar/contracts';
 import type { z } from 'zod';
 import { joinUrl } from '../config/env';
+import { createUuid } from './request-id';
+
+/** Header that correlates a client-side failure with a server log entry. */
+export const REQUEST_ID_HEADER = 'x-request-id';
 
 /** Why a request did not produce a usable response. */
 export type ApiErrorKind =
@@ -57,6 +61,8 @@ export interface HttpClientOptions {
   readonly timeoutMs: number;
   /** Override for the `fetch` implementation. Defaults to the global one. */
   readonly fetchImpl?: FetchLike;
+  /** Source of the per-request correlation id. Defaults to a random UUID. */
+  readonly generateRequestId?: () => string;
 }
 
 export interface RequestOptions {
@@ -133,18 +139,21 @@ function buildQuery(query: RequestOptions['query']): string {
 /**
  * Translate a thrown value from `fetch` into an {@link ApiError}.
  */
-function toTransportError(error: unknown, timedOut: boolean): ApiError {
+function toTransportError(error: unknown, timedOut: boolean, requestId: string): ApiError {
   if (timedOut) {
-    return new ApiError('timeout', 'The request timed out.');
+    return new ApiError('timeout', 'The request timed out.', undefined, undefined, requestId);
   }
 
   if (error instanceof Error && error.name === 'AbortError') {
-    return new ApiError('cancelled', 'The request was cancelled.');
+    return new ApiError('cancelled', 'The request was cancelled.', undefined, undefined, requestId);
   }
 
   return new ApiError(
     'network',
     'The API could not be reached. Check that it is running and reachable from this device.',
+    undefined,
+    undefined,
+    requestId,
   );
 }
 
@@ -152,7 +161,7 @@ function toTransportError(error: unknown, timedOut: boolean): ApiError {
  * Translate a non-2xx response into an {@link ApiError}, reusing the
  * server-provided error envelope when the response carries one.
  */
-function toHttpError(status: number, body: unknown): ApiError {
+function toHttpError(status: number, body: unknown, clientRequestId: string): ApiError {
   const parsed = apiErrorResponseSchema.safeParse(body);
 
   if (parsed.success) {
@@ -160,7 +169,13 @@ function toHttpError(status: number, body: unknown): ApiError {
     return new ApiError('http', message, status, code, requestId);
   }
 
-  return new ApiError('http', `The API responded with status ${status}.`, status);
+  return new ApiError(
+    'http',
+    `The API responded with status ${status}.`,
+    status,
+    undefined,
+    clientRequestId,
+  );
 }
 
 /** HTTP client bound to a single API origin. */
@@ -168,11 +183,13 @@ export class HttpClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
+  private readonly generateRequestId: () => string;
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl;
     this.timeoutMs = options.timeoutMs;
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.generateRequestId = options.generateRequestId ?? createUuid;
   }
 
   /** The API origin this client targets. */
@@ -185,34 +202,75 @@ export class HttpClient {
    *
    * @throws ApiError for every failure mode, including a contract violation.
    */
-  async get<TSchema extends z.ZodType>(
+  get<TSchema extends z.ZodType>(
     path: string,
     schema: TSchema,
     options: RequestOptions = {},
   ): Promise<z.output<TSchema>> {
+    return this.send('GET', path, schema, options);
+  }
+
+  /**
+   * Perform a POST request with a JSON body (or none, for commands that take no
+   * payload) and validate the response against `schema`.
+   *
+   * @throws ApiError for every failure mode, including a contract violation.
+   */
+  post<TSchema extends z.ZodType>(
+    path: string,
+    body: unknown,
+    schema: TSchema,
+    options: RequestOptions = {},
+  ): Promise<z.output<TSchema>> {
+    return this.send('POST', path, schema, options, body);
+  }
+
+  private async send<TSchema extends z.ZodType>(
+    method: 'GET' | 'POST',
+    path: string,
+    schema: TSchema,
+    options: RequestOptions,
+    body?: unknown,
+  ): Promise<z.output<TSchema>> {
     const url = `${joinUrl(this.baseUrl, path)}${buildQuery(options.query)}`;
+    const requestId = this.generateRequestId();
     const request = createRequestSignal(this.timeoutMs, options.signal);
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      [REQUEST_ID_HEADER]: requestId,
+    };
+
+    if (method === 'POST') {
+      headers['Content-Type'] = 'application/json';
+    }
 
     try {
       const response = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
+        method,
+        headers,
+        // A command with no payload still sends `{}`: the API validates an empty
+        // object, and a body-less POST with a JSON content type is rejected by
+        // some parsers.
+        ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
         signal: request.signal,
       });
 
-      const body = await readJsonBody(response);
+      const responseBody = await readJsonBody(response);
 
       if (!response.ok) {
-        throw toHttpError(response.status, body);
+        throw toHttpError(response.status, responseBody, requestId);
       }
 
-      const parsed = schema.safeParse(body);
+      const parsed = schema.safeParse(responseBody);
 
       if (!parsed.success) {
         throw new ApiError(
           'invalid-response',
           'The API returned a response that does not match the expected contract.',
           response.status,
+          undefined,
+          requestId,
         );
       }
 
@@ -222,7 +280,7 @@ export class HttpClient {
         throw error;
       }
 
-      throw toTransportError(error, request.timedOut());
+      throw toTransportError(error, request.timedOut(), requestId);
     } finally {
       request.cleanup();
     }

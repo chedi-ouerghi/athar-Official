@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { HealthResponse, ReadyResponse, ReadinessCheck } from '@athar/contracts';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
+import { TABLE_DRIVER, type TableDriver } from '../device/table-driver.js';
+import { TableRegistry } from '../tables/table-registry.service.js';
 
 /**
  * Delay, in milliseconds, after which an event-loop probe is considered
@@ -21,7 +23,11 @@ const EVENT_LOOP_LAG_THRESHOLD_MS = 100;
 export class HealthService {
   private readonly startedAt = Date.now();
 
-  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(TABLE_DRIVER) private readonly driver: TableDriver,
+    private readonly tables: TableRegistry,
+  ) {}
 
   /** Payload of `GET /health`. Reports that the process is alive and serving. */
   getHealth(): HealthResponse {
@@ -37,16 +43,20 @@ export class HealthService {
   /**
    * Payload of `GET /ready`.
    *
-   * The service currently has no external dependency, so readiness verifies
-   * that the process can serve traffic: configuration resolved at boot and the
-   * event loop is responsive. As dependencies are introduced (database,
-   * cache, device broker), their probes are added here — that is the single
-   * place a new dependency becomes readiness-relevant.
+   * Readiness verifies that the process can serve traffic: configuration
+   * resolved at boot, the event loop responsive, and the table driver able to
+   * answer for every registered table. As dependencies are introduced (database,
+   * cache), their probes are added here — that is the single place a new
+   * dependency becomes readiness-relevant.
+   *
+   * `tableMode` says whether the driver is simulated or physical, and nothing
+   * else about it: no seed data, durations or fault settings.
    */
   async getReadiness(): Promise<ReadyResponse> {
     const checks: ReadinessCheck[] = [
       { name: 'configuration', status: this.isConfigurationUsable() ? 'ok' : 'error' },
       { name: 'event-loop', status: (await this.checkEventLoop()).status },
+      { name: 'table-driver', status: (await this.isTableDriverUsable()) ? 'ok' : 'error' },
     ];
 
     const overall: ReadyResponse['status'] = checks.every((check) => check.status === 'ok')
@@ -59,8 +69,26 @@ export class HealthService {
       version: this.config.serviceVersion,
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+      tableMode: this.driver.mode,
       checks,
     };
+  }
+
+  /**
+   * The driver is constructed (the process would not have started otherwise) and
+   * answers for every registered table. Which table failed, and why, is not
+   * returned: a failing probe is a reason to look at the logs.
+   */
+  private async isTableDriverUsable(): Promise<boolean> {
+    try {
+      for (const table of await this.tables.list()) {
+        await this.driver.getStatus(table.id);
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

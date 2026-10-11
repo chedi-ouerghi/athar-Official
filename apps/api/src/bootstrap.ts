@@ -7,10 +7,13 @@
 
 import { Logger, NotFoundException, RequestMethod, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { API_PREFIX } from '@athar/contracts';
 import { AppModule } from './app.module.js';
 import type { AppConfig } from './config/app-config.js';
+import { JsonFileTableRepository } from './tables/json-file-table.repository.js';
+import type { AppModuleOptions } from './app.module.js';
 
 /**
  * Largest accepted JSON request body.
@@ -87,8 +90,43 @@ function registerRootNotFoundHandler(app: NestExpressApplication): void {
  *
  * The returned instance is initialised but not yet listening.
  */
-export async function createConfiguredApp(config: AppConfig): Promise<NestExpressApplication> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config));
+export async function createConfiguredApp(
+  config: AppConfig,
+  overrides: Partial<AppModuleOptions> = {},
+): Promise<NestExpressApplication> {
+  // The tables file is opened (and validated) before Nest starts, so a corrupt
+  // file stops the process with a readable message instead of a Nest init
+  // failure. Tests pass a repository of their own and never touch the disk.
+  const ownedRepository =
+    overrides.repository === undefined
+      ? await JsonFileTableRepository.open(config.tablesDataFile)
+      : undefined;
+
+  try {
+    return await buildApp(config, {
+      ...overrides,
+      repository: overrides.repository ?? (ownedRepository as JsonFileTableRepository),
+    });
+  } catch (error) {
+    // The application never came up, so nothing else will release the file lock.
+    await ownedRepository?.close();
+    throw error;
+  }
+}
+
+async function buildApp(
+  config: AppConfig,
+  tables: AppModuleOptions,
+): Promise<NestExpressApplication> {
+  // `bufferLogs` holds everything Nest logs while the container is being built
+  // and replays it through pino once `useLogger` installs it, so no line (not
+  // even "Starting Nest application...") escapes as unformatted text. From then
+  // on every `new Logger(...)` in the codebase writes through pino, which
+  // makes LOG_LEVEL, redaction and JSON output apply to application logs too.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config, tables), {
+    bufferLogs: true,
+  });
+  app.useLogger(app.get(PinoLogger));
 
   app.enableShutdownHooks(['SIGINT', 'SIGTERM'], {
     // Terminate via `process.exit` so buffered asynchronous log writes (the
@@ -115,8 +153,11 @@ export async function createConfiguredApp(config: AppConfig): Promise<NestExpres
  *
  * The returned instance is listening; the caller owns shutting it down.
  */
-export async function createApp(config: AppConfig): Promise<NestExpressApplication> {
-  const app = await createConfiguredApp(config);
+export async function createApp(
+  config: AppConfig,
+  overrides: Partial<AppModuleOptions> = {},
+): Promise<NestExpressApplication> {
+  const app = await createConfiguredApp(config, overrides);
 
   await app.listen(config.port, config.host);
 

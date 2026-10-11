@@ -7,6 +7,8 @@ const environment: AppEnvironment = {
   apiBaseUrl: 'http://10.0.2.2:3000',
   apiBaseUrlSource: 'platform-default',
   apiTimeoutMs: 1_000,
+  tableLinkHosts: [],
+  pollIntervalMs: 1_000,
 };
 
 const HEALTH_BODY = {
@@ -23,6 +25,7 @@ const READY_BODY = {
   version: '0.1.0',
   timestamp: '2026-01-01T00:00:00.000Z',
   uptimeSeconds: 12,
+  tableMode: 'simulation',
   checks: [{ name: 'configuration', status: 'ok' }],
 };
 
@@ -54,6 +57,170 @@ describe('AtharApiClient', () => {
 
   it('exposes the origin it was configured with', () => {
     expect(new AtharApiClient(environment).origin).toBe('http://10.0.2.2:3000');
+  });
+});
+
+const TABLE_ID = 'k7q3x9m2d8r5t6w4';
+const JOB_ID = '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b';
+const NOW = '2026-01-01T00:00:00.000Z';
+
+const TABLE = {
+  id: TABLE_ID,
+  displayName: 'Main hall',
+  location: 'Ground floor',
+  enabled: true,
+  mode: 'simulation',
+  connection: 'online',
+  activeJobId: null,
+};
+
+const DESIGN_SUMMARY = {
+  id: 'dunes',
+  slug: 'dunes',
+  title: { en: 'Dunes', ar: 'كثبان' },
+  description: { en: 'Wind-shaped ridges.', ar: 'حافات صنعتها الرياح.' },
+  inspiration: {
+    kind: 'original-modern',
+    note: { en: 'An original interpretation.', ar: 'تفسير أصلي.' },
+    sources: [],
+  },
+  estimatedDurationSeconds: 120,
+};
+
+const JOB = {
+  id: JOB_ID,
+  tableId: TABLE_ID,
+  designId: 'dunes',
+  mode: 'simulation',
+  state: 'drawing',
+  progress: 0.25,
+  createdAt: NOW,
+  startedAt: NOW,
+  updatedAt: NOW,
+  finishedAt: null,
+  errorCode: null,
+};
+
+function clientWith(body: unknown) {
+  const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(body));
+  const client = new AtharApiClient(environment, { fetchImpl });
+  const call = () => fetchImpl.mock.calls[0];
+
+  return { client, call, url: () => call()?.[0], init: () => call()?.[1] };
+}
+
+describe('AtharApiClient: tables, designs and jobs', () => {
+  const base = 'http://10.0.2.2:3000/api/v1';
+
+  it('gets a table', async () => {
+    const { client, url, init } = clientWith(TABLE);
+
+    await expect(client.getTable(TABLE_ID)).resolves.toMatchObject({ id: TABLE_ID });
+    expect(url()).toBe(`${base}/tables/${TABLE_ID}`);
+    expect(init()?.method).toBe('GET');
+  });
+
+  it('lists designs', async () => {
+    const { client, url } = clientWith({ collectionVersion: 1, designs: [DESIGN_SUMMARY] });
+
+    const result = await client.listDesigns();
+
+    expect(url()).toBe(`${base}/designs`);
+    expect(result.designs[0]?.title.ar).toBe('كثبان');
+  });
+
+  it('gets a design with its preview path', async () => {
+    const { client, url } = clientWith({
+      ...DESIGN_SUMMARY,
+      previewPath: [
+        [0, 0],
+        [3, 1],
+      ],
+    });
+
+    const design = await client.getDesign('dunes');
+
+    expect(url()).toBe(`${base}/designs/dunes`);
+    expect(design.previewPath).toHaveLength(2);
+  });
+
+  it('starts a job with a POST carrying the design and the idempotency id', async () => {
+    const { client, url, init } = clientWith({ ...JOB, state: 'queued', progress: 0 });
+    const clientRequestId = '0b8f5f46-3a4d-4c8e-8d3b-6f1d2a9c7e10';
+
+    const job = await client.startJob(TABLE_ID, { designId: 'dunes', clientRequestId });
+
+    expect(url()).toBe(`${base}/tables/${TABLE_ID}/jobs`);
+    expect(init()?.method).toBe('POST');
+    expect(JSON.parse(String(init()?.body))).toStrictEqual({ designId: 'dunes', clientRequestId });
+    expect(job.state).toBe('queued');
+  });
+
+  it('refuses to send a start request that breaks the contract', () => {
+    const { client, call } = clientWith(JOB);
+
+    expect(() =>
+      client.startJob(TABLE_ID, { designId: 'dunes', clientRequestId: 'not-a-uuid' }),
+    ).toThrow();
+    expect(call()).toBeUndefined();
+  });
+
+  it('gets a job', async () => {
+    const { client, url } = clientWith(JOB);
+
+    await expect(client.getJob(JOB_ID)).resolves.toMatchObject({ progress: 0.25 });
+    expect(url()).toBe(`${base}/jobs/${JOB_ID}`);
+  });
+
+  it.each([
+    ['pauseJob', 'pause'],
+    ['resumeJob', 'resume'],
+    ['stopJob', 'stop'],
+  ] as const)('%s POSTs an empty body to /%s', async (method, command) => {
+    const { client, url, init } = clientWith(JOB);
+
+    await client[method](JOB_ID);
+
+    expect(url()).toBe(`${base}/jobs/${JOB_ID}/${command}`);
+    expect(init()?.method).toBe('POST');
+    expect(init()?.body).toBe('{}');
+  });
+
+  it('lists jobs, with an optional limit', async () => {
+    const withLimit = clientWith({ jobs: [JOB] });
+    await withLimit.client.listJobs(TABLE_ID, 5);
+    expect(withLimit.url()).toBe(`${base}/tables/${TABLE_ID}/jobs?limit=5`);
+
+    const without = clientWith({ jobs: [] });
+    await without.client.listJobs(TABLE_ID);
+    expect(without.url()).toBe(`${base}/tables/${TABLE_ID}/jobs`);
+  });
+
+  it('encodes ids so they cannot change the route', async () => {
+    const { client, url } = clientWith(JOB);
+
+    await client.getJob('../health?x=1');
+
+    expect(url()).toBe(`${base}/jobs/..%2Fhealth%3Fx%3D1`);
+  });
+
+  it('rejects a response that breaks the contract', async () => {
+    const { client } = clientWith({ ...JOB, progress: 7 });
+
+    await expect(client.getJob(JOB_ID)).rejects.toMatchObject({ kind: 'invalid-response' });
+  });
+
+  it('sends the same correlation header on every call', async () => {
+    const fetchImpl = vi
+      .fn<FetchLike>()
+      .mockImplementation(() => Promise.resolve(jsonResponse(TABLE)));
+    const client = new AtharApiClient(environment, { fetchImpl, generateRequestId: () => 'rid-1' });
+
+    await client.getTable(TABLE_ID);
+
+    expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>)['x-request-id']).toBe(
+      'rid-1',
+    );
   });
 });
 
