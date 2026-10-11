@@ -1,0 +1,46 @@
+{
+  "name": "@athar/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ATHAR backend API (NestJS).",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently --names \"build,serve\" --prefix-colors \"blue,green\" --kill-others \"pnpm run dev:build\" \"pnpm run dev:serve\"",
+    "dev:build": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "start:dev": "node --watch dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@athar/contracts": "workspace:*",
+    "@nestjs/common": "^12.1.2",
+    "@nestjs/core": "^12.1.2",
+    "@nestjs/platform-express": "^12.1.2",
+    "dotenv": "^18.0.7",
+    "nestjs-pino": "^5.3.1",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^12.1.2",
+    "@swc/core": "^1.16.13",
+    "@types/node": "^26.6.5",
+    "@types/supertest": "^7.2.1",
+    "concurrently": "^10.0.6",
+    "pino-pretty": "^13.2.0",
+    "supertest": "^7.3.1",
+    "typescript": "~6.0.3",
+    "unplugin-swc": "^2.0.0",
+    "vitest": "^5.0.3"
+  }
+}

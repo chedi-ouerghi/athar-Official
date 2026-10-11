@@ -1,0 +1,33 @@
+{
+  "name": "athar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ATHAR - smart table mobile and backend monorepo",
+  "packageManager": "pnpm@10.12.2",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --stream --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @athar/api dev",
+    "dev:mobile": "pnpm --filter @athar/mobile start",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "lint:fix": "pnpm -r lint:fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r test",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "@athar/config": "workspace:*",
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "^57.0.2",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript-eslint": "^8.71.1"
+  }
+}
