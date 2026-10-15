@@ -9,7 +9,7 @@ import { createApp, createConfiguredApp } from '../src/bootstrap.js';
 import { StartupConfigurationError } from '../src/config/startup-configuration.error.js';
 import { JsonFileTableRepository } from '../src/tables/json-file-table.repository.js';
 import { createTestConfig } from './create-test-config.js';
-import { TEST_ADMIN_KEY } from './create-test-app.js';
+import { bearer, signIn } from './create-test-app.js';
 
 /**
  * The application wired to the real JSON-file repository, as `main.ts` builds
@@ -20,7 +20,14 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
   let directory: string;
   let file: string;
 
-  const config = () => createTestConfig({ ADMIN_API_KEY: TEST_ADMIN_KEY, TABLES_DATA_FILE: file });
+  // Accounts and sessions go to a directory of their own, so `data` holds only the tables file.
+  const config = (environment: Record<string, unknown> = {}) =>
+    createTestConfig({
+      TABLES_DATA_FILE: file,
+      ACCOUNTS_DATA_FILE: join(directory, 'auth', 'accounts.json'),
+      SESSIONS_DATA_FILE: join(directory, 'auth', 'sessions.json'),
+      ...environment,
+    });
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'athar-persistence-'));
@@ -48,7 +55,7 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
     try {
       const created = await request(first.getHttpServer())
         .post('/api/v1/admin/tables')
-        .set('Authorization', `Bearer ${TEST_ADMIN_KEY}`)
+        .set(bearer(await signIn(first)))
         .send({ displayName: 'Survivor', location: 'Hall' })
         .expect(201);
 
@@ -75,15 +82,16 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
     let id: string;
 
     try {
+      const admin = bearer(await signIn(first));
       const created = await request(first.getHttpServer())
         .post('/api/v1/admin/tables')
-        .set('Authorization', `Bearer ${TEST_ADMIN_KEY}`)
+        .set(admin)
         .send({ displayName: 'Before', location: 'Hall' });
       id = (created.body as { id: string }).id;
 
       await request(first.getHttpServer())
         .patch(`/api/v1/admin/tables/${id}`)
-        .set('Authorization', `Bearer ${TEST_ADMIN_KEY}`)
+        .set(admin)
         .send({ enabled: false, displayName: 'After' })
         .expect(200);
     } finally {
@@ -124,13 +132,7 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
     const { port } = blocker.address() as AddressInfo;
 
     try {
-      return await createApp(
-        createTestConfig({
-          ADMIN_API_KEY: TEST_ADMIN_KEY,
-          TABLES_DATA_FILE: file,
-          PORT: String(port),
-        }),
-      ).then(
+      return await createApp(config({ PORT: String(port) })).then(
         () => undefined,
         (error: unknown) => error,
       );
@@ -178,18 +180,68 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
   });
 
   it('releases the lock if the application fails to come up after opening the file', async () => {
-    const failure = await createConfiguredApp(
-      createTestConfig({
-        ADMIN_API_KEY: TEST_ADMIN_KEY,
-        TABLES_DATA_FILE: file,
-        TABLE_MODE: 'hardware',
-      }),
-    ).then(
+    const failure = await createConfiguredApp(config({ TABLE_MODE: 'hardware' })).then(
       () => undefined,
       (error: unknown) => error,
     );
 
     expect(failure).toBeInstanceOf(StartupConfigurationError);
     expect(await readdir(join(directory, 'data'))).toStrictEqual(['tables.json']);
+    expect(await readdir(join(directory, 'auth'))).toStrictEqual([
+      'accounts.json',
+      'sessions.json',
+    ]);
+  });
+
+  it('keeps accounts and sessions across a restart, storing no secret', async () => {
+    const first = await createConfiguredApp(config());
+    let session: Awaited<ReturnType<typeof signIn>>;
+
+    try {
+      session = await signIn(first);
+    } finally {
+      await first.close();
+    }
+
+    const stored = await readFile(join(directory, 'auth', 'accounts.json'), 'utf8');
+    const sessions = await readFile(join(directory, 'auth', 'sessions.json'), 'utf8');
+    expect(stored).toContain(session.account.email);
+    expect(stored).not.toContain('test-password');
+    expect(sessions).not.toContain(session.accessToken);
+    expect(sessions).not.toContain(session.refreshToken);
+
+    const second = await createConfiguredApp(config());
+
+    try {
+      const me = await request(second.getHttpServer())
+        .get('/api/v1/auth/me')
+        .set(bearer(session))
+        .expect(200);
+
+      expect(me.body).toStrictEqual(session.account);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('refuses to start while another process holds the accounts file', async () => {
+    const app = await createConfiguredApp(config());
+
+    try {
+      const failure = await createConfiguredApp(
+        config({ TABLES_DATA_FILE: join(directory, 'other.json') }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(failure).toBeInstanceOf(StartupConfigurationError);
+      expect((failure as Error).message).toContain('ACCOUNTS_DATA_FILE');
+    } finally {
+      await app.close();
+    }
+
+    // The failed start released the tables lock it had taken.
+    expect(await readdir(directory)).not.toContain('other.json.lock');
   });
 });

@@ -12,22 +12,24 @@ import { systemClock } from './device/clock.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { DeviceModule } from './device/device.module.js';
 import { TablesModule, type TablesModuleOptions } from './tables/tables.module.js';
+import { AuthModule, type AuthModuleOptions } from './auth/auth.module.js';
 
 /**
  * Application composition root.
  *
- * `AppModule.forRoot(config, tables)` receives the already-validated
- * configuration instead of reading `process.env`, and an already-opened table
- * repository instead of opening a file, which keeps the module graph free of
+ * `AppModule.forRoot(config, options)` receives the already-validated
+ * configuration instead of reading `process.env`, and already-opened
+ * repositories instead of opening files, which keeps the module graph free of
  * ambient state and lets integration tests build the real application with an
  * explicit configuration and an in-memory repository.
  */
 /**
- * What a test may replace. `repository` is required: the caller opens it, so a bad
- * tables file stops the process before Nest starts. The `clock` is shared by the
- * driver, the tables and the jobs, so they always agree on the time.
+ * What a test may replace. The repositories are required: the caller opens them,
+ * so a bad data file stops the process before Nest starts. The `clock` is shared
+ * by the driver, the tables, the jobs and the sessions, so they always agree on
+ * the time.
  */
-export interface AppModuleOptions extends TablesModuleOptions {
+export interface AppModuleOptions extends TablesModuleOptions, AuthModuleOptions {
   /** Drives the simulator's ticks. Defaults to real timers. */
   readonly scheduler?: Scheduler;
 }
@@ -46,6 +48,7 @@ export class AppModule {
           clock,
           ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
         }),
+        AuthModule.forRoot({ ...options, clock }),
         TablesModule.forRoot({ ...options, clock }),
         DesignsModule.forRoot(),
         JobsModule.forRoot({ historyLimit: config.jobHistoryLimit, clock }),

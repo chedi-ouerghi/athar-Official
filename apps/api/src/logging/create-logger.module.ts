@@ -19,8 +19,12 @@ import type { AppConfig } from '../config/app-config.js';
  */
 const REQUEST_ID_HEADER = 'x-request-id';
 
+/** Auth body fields that are secrets: a password, a token or an activation code. */
+const SECRET_FIELDS = ['password', 'refreshToken', 'accessToken', 'activationCode'];
+
 /**
- * Request/response header fields whose values must never reach the log stream.
+ * Fields whose values must never reach the log stream: credentials in headers,
+ * and auth secrets in a request body or any object logged by mistake.
  *
  * Redaction is applied by pino itself, so a value cannot leak through a custom
  * serialiser or a log transport.
@@ -30,9 +34,7 @@ export const REDACTED_PATHS = [
   'req.headers.cookie',
   `req.headers["${REQUEST_ID_HEADER}"]`,
   'res.headers["set-cookie"]',
-  // The admin key, if a configuration object is ever logged by mistake.
-  'adminApiKey',
-  '*.adminApiKey',
+  ...SECRET_FIELDS.flatMap((field) => [field, `*.${field}`, `req.body.${field}`]),
 ];
 
 /** Placeholder written in place of a redacted value. */

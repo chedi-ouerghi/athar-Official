@@ -40,13 +40,15 @@ every problem at once.
 | `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`          | Drawing jobs remembered per table (below)                               |
 | `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`         | Progress at which an injected fault occurs                              |
 
-### Tables, admin access and QR links
+### Data files and QR links
 
-| Variable               | Default              | Purpose                                                              |
-| ---------------------- | -------------------- | -------------------------------------------------------------------- |
-| `TABLES_DATA_FILE`     | `./data/tables.json` | JSON file that stores the registered tables                          |
-| `ADMIN_API_KEY`        | _(unset)_            | Secret for `/api/v1/admin/**`, sent as `Authorization: Bearer <key>` |
-| `PUBLIC_LINK_BASE_URL` | _(unset)_            | Origin used to build the link in each table's QR code                |
+| Variable               | Default                | Purpose                                               |
+| ---------------------- | ---------------------- | ----------------------------------------------------- |
+| `TABLES_DATA_FILE`     | `./data/tables.json`   | JSON file that stores the registered tables           |
+| `ACCOUNTS_DATA_FILE`   | `./data/accounts.json` | JSON file that stores accounts (password hashes only) |
+| `SESSIONS_DATA_FILE`   | `./data/sessions.json` | JSON file that stores sessions (token hashes only)    |
+| `PUBLIC_LINK_BASE_URL` | _(unset)_              | Origin used to build the link in each table's QR code |
+| `TRUST_PROXY`          | _(unset)_              | Reverse proxies whose `X-Forwarded-For` is believed   |
 
 **`TABLES_DATA_FILE`.** Relative paths are resolved from the directory the API
 runs in (`apps/api` under `pnpm`). The file and its directory are created on
@@ -57,17 +59,20 @@ refuses to run while the API does. A corrupt or unknown-version file stops the A
 from starting, with a message naming the file, and is never overwritten. The file
 and `./qr-codes` are git-ignored.
 
-**`ADMIN_API_KEY`.** In **production** the API refuses to start if it is missing,
-shorter than 32 characters, or still the placeholder from `.env.example`. In
-development and test it is optional, and when unset the admin endpoints **refuse
-every request** (they fail closed). Generate one with, for example,
-`openssl rand -base64 48` or
-`node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"`.
-It is compared in constant time, accepted only in the `Authorization` header, and
-redacted from logs. It belongs to the server: never put it in the mobile app, in
-an `EXPO_PUBLIC_*` variable, or in a QR code. There is one shared key with no
-identity and no audit trail, and rotating it means restarting the API with a new
-value (see open decision 18 in [architecture.md](architecture.md)).
+**`ACCOUNTS_DATA_FILE`, `SESSIONS_DATA_FILE`.** Same rules as the tables file:
+created on first start, persistent storage, one writing process (`<file>.lock`),
+and a corrupt file stops the API. They hold only scrypt password hashes and
+SHA-256 token hashes, never a password or token, but treat them as sensitive.
+`admin:create` writes the accounts file and refuses while the API runs. The old
+shared admin key setting is gone: admins sign in with accounts. Token lifetimes
+are constants in `apps/api/src/auth/`, not settings.
+
+**`TRUST_PROXY`.** The sign-in rate limit keys on the client's IP. Behind a
+reverse proxy every request comes from the proxy, so set the number of proxy hops
+(`1` for one proxy such as Caddy) or a comma-separated list of proxy IPs or CIDRs
+(`10.0.0.0/8,127.0.0.1`). `true` is refused: it would let any client choose its
+own address. Unset (the default) trusts no proxy and uses the socket's address;
+setting it without a proxy in front would let clients forge their address.
 
 **`PUBLIC_LINK_BASE_URL`.** An `https` origin such as `https://app.athar.example`:
 no port, path, query or credentials, because the app refuses any other link; a

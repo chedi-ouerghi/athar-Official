@@ -21,6 +21,8 @@ describe('environmentSchema', () => {
       SIMULATION_FAULT_AT_PROGRESS: 0.6,
       JOB_HISTORY_LIMIT: 20,
       TABLES_DATA_FILE: './data/tables.json',
+      ACCOUNTS_DATA_FILE: './data/accounts.json',
+      SESSIONS_DATA_FILE: './data/sessions.json',
     });
   });
 
@@ -117,6 +119,8 @@ describe('environmentSchema', () => {
       'SIMULATION_FAULT_AT_PROGRESS',
       'JOB_HISTORY_LIMIT',
       'TABLES_DATA_FILE',
+      'ACCOUNTS_DATA_FILE',
+      'SESSIONS_DATA_FILE',
     ]);
     expect(environmentSchema.shape).not.toHaveProperty('SOME_UNRELATED_FLAG');
   });

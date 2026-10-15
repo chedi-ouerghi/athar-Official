@@ -10,12 +10,10 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { InMemoryTableRepository } from '../src/tables/in-memory-table.repository.js';
-import { TEST_ADMIN_KEY, createTestApp } from './create-test-app.js';
+import { bearer, createTestApp, signIn } from './create-test-app.js';
 import { fixtureTables } from './table-fixtures.js';
 
 const ADMIN = '/api/v1/admin/tables';
-const bearer = (key: string) => ({ Authorization: `Bearer ${key}` });
-const admin = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
 
 /** Parse a response against the shared error envelope and return its `error`. */
 function errorOf(body: unknown) {
@@ -24,9 +22,14 @@ function errorOf(body: unknown) {
 
 describe('tables over HTTP', () => {
   let app: NestExpressApplication;
+  /** An admin's access token, and the header that carries it. */
+  let token: string;
+  let admin: { Authorization: string };
 
   beforeAll(async () => {
     app = await createTestApp({}, { repository: new InMemoryTableRepository(fixtureTables()) });
+    token = (await signIn(app)).accessToken;
+    admin = { Authorization: `Bearer ${token}` };
   });
 
   afterAll(async () => {
@@ -100,7 +103,7 @@ describe('tables over HTTP', () => {
       ['get', `${ADMIN}/table-001/qr`],
     ];
 
-    it.each(routes)('rejects %s %s without a key', async (method, path) => {
+    it.each(routes)('rejects %s %s without a token', async (method, path) => {
       const response = await http()[method](path).expect(401);
 
       expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
@@ -108,22 +111,29 @@ describe('tables over HTTP', () => {
     });
 
     it.each([
-      ['a wrong key', 'Bearer wrong-key'],
-      ['the key without a scheme', TEST_ADMIN_KEY],
-      ['the Basic scheme', `Basic ${TEST_ADMIN_KEY}`],
-      ['Bearer with no token', 'Bearer '],
-      ['a key with a character changed', `Bearer ${TEST_ADMIN_KEY.slice(0, -1)}X`],
-      ['a key with a character added', `Bearer ${TEST_ADMIN_KEY}x`],
-      ['an empty header', ''],
+      ['a wrong token', () => 'Bearer wrong-token'],
+      ['the token without a scheme', () => token],
+      ['the Basic scheme', () => `Basic ${token}`],
+      ['Bearer with no token', () => 'Bearer '],
+      ['a token with a character changed', () => `Bearer ${token.slice(0, -1)}X`],
+      ['a token with a character added', () => `Bearer ${token}x`],
+      ['an empty header', () => ''],
     ])('rejects %s', async (_label, header) => {
-      await http().get(ADMIN).set('Authorization', header).expect(401);
+      await http().get(ADMIN).set('Authorization', header()).expect(401);
     });
 
-    it('gives the same response for a missing, malformed and wrong key', async () => {
+    it.each(routes)('refuses %s %s to a customer with FORBIDDEN', async (method, path) => {
+      const customer = await signIn(app, 'customer');
+      const response = await http()[method](path).set(bearer(customer)).expect(403);
+
+      expect(errorOf(response.body).code).toBe('FORBIDDEN');
+    });
+
+    it('gives the same response for a missing, malformed and wrong token', async () => {
       const responses = await Promise.all([
         http().get(ADMIN),
         http().get(ADMIN).set('Authorization', 'Basic abc'),
-        http().get(ADMIN).set('Authorization', 'Bearer wrong-key'),
+        http().get(ADMIN).set('Authorization', 'Bearer wrong-token'),
       ]);
       const errors = responses.map((response) => {
         const { requestId, timestamp, ...rest } = errorOf(response.body);
@@ -143,26 +153,26 @@ describe('tables over HTTP', () => {
       ).toStrictEqual(new Set(['Bearer']));
     });
 
-    it('never echoes the key it was sent', async () => {
+    it('never echoes the token it was sent', async () => {
       const response = await http().get(ADMIN).set('Authorization', 'Bearer super-secret-attempt');
 
       expect(JSON.stringify(response.body)).not.toContain('super-secret-attempt');
       expect(JSON.stringify(response.headers)).not.toContain('super-secret-attempt');
     });
 
-    it('checks the key before the body, so a stranger learns nothing about valid requests', async () => {
+    it('checks the token before the body, so a stranger learns nothing about valid requests', async () => {
       const response = await http().post(ADMIN).send({ displayName: '' }).expect(401);
 
       expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
     });
 
     it('accepts the Bearer scheme in any letter case', async () => {
-      await http().get(ADMIN).set('Authorization', `bearer ${TEST_ADMIN_KEY}`).expect(200);
+      await http().get(ADMIN).set('Authorization', `bearer ${token}`).expect(200);
     });
 
-    it('does not accept the key in the URL or the body', async () => {
-      await http().get(`${ADMIN}?key=${TEST_ADMIN_KEY}`).expect(401);
-      await http().post(ADMIN).send({ key: TEST_ADMIN_KEY }).expect(401);
+    it('does not accept the token in the URL or the body', async () => {
+      await http().get(`${ADMIN}?accessToken=${token}`).expect(401);
+      await http().post(ADMIN).send({ accessToken: token }).expect(401);
     });
   });
 
@@ -408,9 +418,11 @@ describe('tables over HTTP', () => {
 
 describe('the QR link with an origin configured', () => {
   let app: NestExpressApplication;
+  let admin: { Authorization: string };
 
   beforeAll(async () => {
     app = await createTestApp({ PUBLIC_LINK_BASE_URL: 'https://app.athar.example/' });
+    admin = bearer(await signIn(app));
   });
 
   afterAll(async () => {
@@ -420,7 +432,7 @@ describe('the QR link with an origin configured', () => {
   it('is <origin>/t/<tableId>, with the trailing slash of the setting normalised away', async () => {
     const response = await request(app.getHttpServer())
       .get(`${ADMIN}/table-001/qr`)
-      .set(bearer(TEST_ADMIN_KEY))
+      .set(admin)
       .expect(200);
 
     expect(tableQrResponseSchema.parse(response.body)).toStrictEqual({
@@ -430,38 +442,10 @@ describe('the QR link with an origin configured', () => {
   });
 
   it('holds only the public id: no query, fragment, token or signature', async () => {
-    const response = await request(app.getHttpServer())
-      .get(`${ADMIN}/table-001/qr`)
-      .set(bearer(TEST_ADMIN_KEY));
+    const response = await request(app.getHttpServer()).get(`${ADMIN}/table-001/qr`).set(admin);
     const { link } = response.body as { link: string };
 
     expect(link).not.toMatch(/[?#]/);
     expect(Object.keys(response.body as object).sort()).toStrictEqual(['link', 'tableId']);
-  });
-});
-
-describe('a server with no admin key configured', () => {
-  let app: NestExpressApplication;
-
-  beforeAll(async () => {
-    app = await createTestApp({ ADMIN_API_KEY: undefined });
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  it('fails closed: every admin request is refused, whatever it sends', async () => {
-    for (const header of [undefined, 'Bearer ', 'Bearer undefined', `Bearer ${TEST_ADMIN_KEY}`]) {
-      const call = request(app.getHttpServer()).get(ADMIN);
-      const response = await (header === undefined ? call : call.set('Authorization', header));
-
-      expect(response.status).toBe(401);
-      expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
-    }
-  });
-
-  it('still serves the public endpoint', async () => {
-    await request(app.getHttpServer()).get('/api/v1/tables/table-001').expect(200);
   });
 });

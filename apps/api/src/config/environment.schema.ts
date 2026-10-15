@@ -6,8 +6,37 @@
  * the first request.
  */
 
+import { isIP } from 'node:net';
 import { z } from 'zod';
-import { ADMIN_API_KEY_MIN_LENGTH, ADMIN_API_KEY_PLACEHOLDER } from './admin-key.js';
+
+/**
+ * Express's `trust proxy` value from `TRUST_PROXY`: a hop count (`1` behind one
+ * reverse proxy such as Caddy), or a comma-separated list of proxy IPs or CIDRs.
+ * Never `true`, which would let any client choose its own IP with
+ * `X-Forwarded-For`. `undefined` for anything else.
+ */
+export function parseTrustProxy(text: string): number | string[] | undefined {
+  const value = text.trim();
+
+  if (/^\d{1,2}$/.test(value)) {
+    return Number(value);
+  }
+
+  const entries = value.split(',').map((entry) => entry.trim());
+  const valid = entries.every((entry) => {
+    const [address = '', prefix, extra] = entry.split('/');
+    const family = isIP(address);
+    const bits = family === 4 ? 32 : 128;
+
+    return (
+      family !== 0 &&
+      extra === undefined &&
+      (prefix === undefined || (/^\d{1,3}$/.test(prefix) && Number(prefix) <= bits))
+    );
+  });
+
+  return valid ? entries : undefined;
+}
 
 /** Pino log levels, ordered from most to least verbose. */
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -70,14 +99,11 @@ export const environmentSchema = z
      */
     TABLES_DATA_FILE: z.string().min(1).default('./data/tables.json'),
 
-    /**
-     * Secret that protects `/api/v1/admin/**`, sent as `Authorization: Bearer`.
-     *
-     * Optional in development and test, where an unset key makes the admin
-     * endpoints refuse everyone. Required in production; see the checks below.
-     * Never logged: error messages here describe the key, never quote it.
-     */
-    ADMIN_API_KEY: optionalText,
+    /** JSON file that stores accounts (password hashes, never passwords). Same rules as tables. */
+    ACCOUNTS_DATA_FILE: z.string().min(1).default('./data/accounts.json'),
+
+    /** JSON file that stores sessions (token hashes, never tokens). Same rules as tables. */
+    SESSIONS_DATA_FILE: z.string().min(1).default('./data/sessions.json'),
 
     /**
      * Origin used to build the link inside a table's QR code:
@@ -87,33 +113,28 @@ export const environmentSchema = z
      * `athar://` scheme.
      */
     PUBLIC_LINK_BASE_URL: optionalText.transform((value) => value?.trim().replace(/\/+$/, '')),
+
+    /**
+     * Which reverse proxies to believe about the client's IP (`X-Forwarded-For`),
+     * which the sign-in throttle keys on. Unset: trust none, use the socket's
+     * address. See {@link parseTrustProxy}.
+     */
+    TRUST_PROXY: optionalText,
   })
   .superRefine((environment, context) => {
     const production = environment.NODE_ENV === 'production';
-    const key = environment.ADMIN_API_KEY;
 
-    if (production) {
-      if (key === undefined) {
-        context.addIssue({
-          code: 'custom',
-          path: ['ADMIN_API_KEY'],
-          message: 'is required when NODE_ENV=production',
-        });
-      } else if (key.length < ADMIN_API_KEY_MIN_LENGTH) {
-        context.addIssue({
-          code: 'custom',
-          path: ['ADMIN_API_KEY'],
-          message: `must be at least ${ADMIN_API_KEY_MIN_LENGTH} characters when NODE_ENV=production`,
-        });
-      } else if (key === ADMIN_API_KEY_PLACEHOLDER) {
-        context.addIssue({
-          code: 'custom',
-          path: ['ADMIN_API_KEY'],
-          message: 'is still the placeholder from .env.example; set a real random secret',
-        });
-      }
+    if (
+      environment.TRUST_PROXY !== undefined &&
+      parseTrustProxy(environment.TRUST_PROXY) === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['TRUST_PROXY'],
+        message:
+          'must be a hop count such as 1, or a comma-separated list of proxy IPs or CIDRs (never true)',
+      });
     }
-
     const base = environment.PUBLIC_LINK_BASE_URL;
 
     if (base === undefined) {

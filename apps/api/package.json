@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "table:create": "tsc -p tsconfig.build.json && node dist/cli/table-create.js",
+    "admin:create": "tsc -p tsconfig.build.json && node dist/cli/admin-create.js",
     "table:qr": "tsc -p tsconfig.build.json && node dist/cli/table-qr.js",
     "designs:svg": "tsc -p tsconfig.build.json && node dist/cli/design-svg.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -230,15 +230,15 @@ from the app to a table is app → API → driver.
 
 ### Responsibilities
 
-| Component            | Owns                                                                                                                           | Must not                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `apps/mobile`        | Screens, link/QR handling, polling, presentation of mode and state                                                             | Contain simulator logic, know trajectories, or build URLs        |
-| `apps/api`           | Domain rules, the job state machine, validation, the driver boundary                                                           | Import mobile code; let a controller call a concrete driver      |
-| `packages/contracts` | Wire schemas: table, design, job, error codes, table id                                                                        | Import NestJS/React Native; carry trajectories or driver details |
-| `tables` (API)       | Table registry (persisted), `enabled` flag, derived connection status, the admin provisioning endpoints behind `ADMIN_API_KEY` | Own job state                                                    |
-| `designs` (API)      | The four static designs and their trajectories (versioned data in the repo)                                                    | Be writable at runtime                                           |
-| `drawing-jobs` (API) | `DrawingJob` records, the state machine, one-active-job rule, idempotency                                                      | Know how a table moves sand                                      |
-| `device` (API)       | `TableDriver`, `SimulatedTableDriver`, driver selection from `TABLE_MODE`                                                      | Be bypassed: everything else uses the `TableDriver` token        |
+| Component            | Owns                                                                                                                            | Must not                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `apps/mobile`        | Screens, link/QR handling, polling, presentation of mode and state                                                              | Contain simulator logic, know trajectories, or build URLs        |
+| `apps/api`           | Domain rules, the job state machine, validation, the driver boundary                                                            | Import mobile code; let a controller call a concrete driver      |
+| `packages/contracts` | Wire schemas: table, design, job, error codes, table id                                                                         | Import NestJS/React Native; carry trajectories or driver details |
+| `tables` (API)       | Table registry (persisted), `enabled` flag, derived connection status, the admin provisioning endpoints behind an admin session | Own job state                                                    |
+| `designs` (API)      | The four static designs and their trajectories (versioned data in the repo)                                                     | Be writable at runtime                                           |
+| `drawing-jobs` (API) | `DrawingJob` records, the state machine, one-active-job rule, idempotency                                                       | Know how a table moves sand                                      |
+| `device` (API)       | `TableDriver`, `SimulatedTableDriver`, driver selection from `TABLE_MODE`                                                       | Be bypassed: everything else uses the `TableDriver` token        |
 
 Dependency rules (code review, and lint `no-restricted-imports` where
 practical):
@@ -827,11 +827,12 @@ exceptions rather than deriving it from the status alone (gap 3.6).
 | `TABLE_BUSY`           | 409  | The table already has an active job              |
 | `INVALID_TRANSITION`   | 409  | Command not allowed in the job's current state   |
 | `IDEMPOTENCY_CONFLICT` | 409  | `clientRequestId` reused with a different design |
-| `UNAUTHORIZED`         | 401  | Admin endpoints only: missing or wrong admin key |
+| `UNAUTHORIZED`         | 401  | No session, or an unknown access token           |
 
-`UNAUTHORIZED` is only returned under `/api/v1/admin`
-([Table provisioning](#table-provisioning-admin)); the public endpoints in this
+`UNAUTHORIZED` is only returned under `/api/v1/admin` and `/api/v1/auth`
+([Admin authentication](#admin-authentication)); the public endpoints in this
 section never return it, because they have no authentication in this milestone.
+The session codes are listed in [api-conventions.md](api-conventions.md#sessions).
 The existing codes keep their meaning. Check order for
 `POST /tables/:tableId/jobs`: validation, table exists, design exists,
 idempotency replay, table enabled, table online, table not busy.
@@ -1024,8 +1025,8 @@ screen both call it, so they cannot disagree.
 
 Honestly: **no access control exists on the public endpoints in this
 milestone**, and none is claimed. (The admin endpoints, which create and edit
-tables, are different: they require `ADMIN_API_KEY`; see
-[Table provisioning](#table-provisioning-admin). That key protects who can
+tables, are different: they require an admin session; see
+[Table provisioning](#table-provisioning-admin). That protects who can
 _register_ tables, not who can _use_ one.) What limits the damage:
 
 1. **Every table is simulated.** `TABLE_MODE=hardware` cannot start, so no
@@ -1308,16 +1309,17 @@ and `createAppConfig`, listed in `apps/api/.env.example` and in
 [environment-configuration.md](environment-configuration.md). Nothing reads
 `process.env` outside `src/config`.
 
-| Variable                         | Type          | Default              | Example                           | Purpose                                                                                                                                                     |
-| -------------------------------- | ------------- | -------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TABLE_MODE`                     | enum          | `simulation`         | `simulation`                      | `simulation` or `hardware`; `hardware` fails startup for now                                                                                                |
-| `TABLES_DATA_FILE`               | path          | `./data/tables.json` | `/var/lib/athar/tables.json`      | JSON file holding registered tables; created if missing. Must be on persistent storage                                                                      |
-| `ADMIN_API_KEY`                  | secret string | _(unset)_            | `x7Gq…` (>= 32 random characters) | Key for `/api/v1/admin/**`. **Required when `NODE_ENV=production`**; never logged                                                                           |
-| `PUBLIC_LINK_BASE_URL`           | URL           | _(unset)_            | `https://app.athar.example`       | Origin used to build the QR link `<base>/t/<tableId>`. Required in production, must be `https` there. Unset in development: links use `athar://t/<tableId>` |
-| `SIMULATION_SPEED_FACTOR`        | number > 0    | `1`                  | `10`                              | Divides simulated durations; large values for tests and demos                                                                                               |
-| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0  | `0`                  | `3`                               | Every Nth job faults; `0` disables injected faults                                                                                                          |
-| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1   | `0.6`                | `0.5`                             | Progress at which an injected fault occurs                                                                                                                  |
-| `JOB_HISTORY_LIMIT`              | integer >= 1  | `20`                 | `20`                              | Jobs retained per table                                                                                                                                     |
+| Variable                         | Type         | Default                | Example                        | Purpose                                                                                                                                                     |
+| -------------------------------- | ------------ | ---------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TABLE_MODE`                     | enum         | `simulation`           | `simulation`                   | `simulation` or `hardware`; `hardware` fails startup for now                                                                                                |
+| `TABLES_DATA_FILE`               | path         | `./data/tables.json`   | `/var/lib/athar/tables.json`   | JSON file holding registered tables; created if missing. Must be on persistent storage                                                                      |
+| `ACCOUNTS_DATA_FILE`             | path         | `./data/accounts.json` | `/var/lib/athar/accounts.json` | JSON file holding accounts (password hashes only). Persistent storage                                                                                       |
+| `SESSIONS_DATA_FILE`             | path         | `./data/sessions.json` | `/var/lib/athar/sessions.json` | JSON file holding sessions (token hashes only). Persistent storage                                                                                          |
+| `PUBLIC_LINK_BASE_URL`           | URL          | _(unset)_              | `https://app.athar.example`    | Origin used to build the QR link `<base>/t/<tableId>`. Required in production, must be `https` there. Unset in development: links use `athar://t/<tableId>` |
+| `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`                    | `10`                           | Divides simulated durations; large values for tests and demos                                                                                               |
+| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`                    | `3`                            | Every Nth job faults; `0` disables injected faults                                                                                                          |
+| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`                  | `0.5`                          | Progress at which an injected fault occurs                                                                                                                  |
+| `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`                   | `20`                           | Jobs retained per table                                                                                                                                     |
 
 The `SIMULATION_*` variables have no effect when `TABLE_MODE=hardware`, which
 cannot start in this milestone anyway.
@@ -1363,7 +1365,7 @@ sequenceDiagram
   participant Store as tables.json
   participant Cli as table:qr CLI
   participant B as Buyer (mobile app)
-  A->>Api: POST /api/v1/admin/tables (Authorization: Bearer ADMIN_API_KEY)
+  A->>Api: POST /api/v1/admin/tables (Authorization: Bearer admin access token)
   Api->>Api: generate random table id
   Api->>Store: write atomically
   Api-->>A: table + id
@@ -1428,49 +1430,34 @@ Rules:
   the custom-scheme form `athar://t/<tableId>`. Returning the link from the API,
   rather than only from the CLI, lets a future admin UI render the QR itself.
 - The public endpoints are **unchanged** (section 5). Nothing under
-  `/api/v1/admin` is reachable without the key, and no public endpoint exposes
+  `/api/v1/admin` is reachable without an admin session, and no public endpoint exposes
   the admin view.
 
 ### Admin authentication
 
-Admin endpoints are protected by a **server-side secret, `ADMIN_API_KEY`**,
-sent as `Authorization: Bearer <key>`.
+Admin endpoints need a **session of an account with the `admin` role**
+(decisions D5 and D8 in [plans/athar-v1-plan.md](plans/athar-v1-plan.md)), sent
+as `Authorization: Bearer <accessToken>`. Admins are created with
+`pnpm --filter @athar/api admin:create`; there is no shared key.
 
-- Checked by a Nest guard applied to the whole admin controller, so a new admin
-  route is protected by default and an unprotected one has to be deliberate.
-- **Constant-time comparison.** The guard hashes both the supplied and the
-  configured key with SHA-256 and compares the digests with
-  `crypto.timingSafeEqual`. Hashing first gives equal-length buffers, so neither
-  the comparison time nor an early length check leaks how much of the key
-  matched.
-- **A missing header, a malformed header, a wrong key and an unset server key
-  all return the same response**: `401`, error code `UNAUTHORIZED`, a generic
-  message ("Authentication is required."), and `WWW-Authenticate: Bearer`. The
-  response never says which of these happened. The new `UNAUTHORIZED` code is
-  added to `@athar/contracts` (additive within `v1`), and the error filter must
-  map it (gap 3.6 already requires domain codes to pass through).
-- **Required in production.** `ADMIN_API_KEY` is validated in
-  `environment.schema.ts`: when `NODE_ENV=production`, startup fails if it is
-  missing, shorter than 32 characters, or equal to the placeholder in
-  `.env.example`. In development and test it is optional; when it is unset the
-  admin endpoints **fail closed** (every request is `UNAUTHORIZED`).
-- **Never logged.** `req.headers.authorization` is already in the pino redaction
-  list (`create-logger.module.ts`), which covers request logs. This milestone
-  also adds `adminApiKey` and `*.adminApiKey` to that list so the key stays
-  hidden if a config object is ever logged, and `AppConfig` must never be
-  logged whole. The key is only accepted in the header: never in a URL or body,
-  so it cannot land in access logs or the exception filter's
-  `METHOD url` line.
-- **Never in the mobile app.** It is not an `EXPO_PUBLIC_*` variable and no
-  mobile code, contract or build config refers to it. The mobile client never
-  calls `/api/v1/admin`.
-- The key is a **shared secret with no identity**: any holder is every
-  administrator, there is no audit trail of who did what, and rotation means
-  redeploying. That is acceptable for a first milestone and is why real admin
-  accounts are an open decision (18).
-- Brute force: a 32+ character random key is not guessable online, and there is
-  no rate limiting yet (a known gap). Whether the admin routes should also be
-  limited by network, host or rate is open decision 21.
+- `SessionGuard` + `@Roles('admin')` sit on the whole admin controller, so a new
+  admin route is protected by default. The guard runs before validation.
+- Tokens are opaque (256 random bits); only their SHA-256 is stored, in
+  `SESSIONS_DATA_FILE`. Passwords are scrypt hashes in `ACCOUNTS_DATA_FILE`.
+  Stored hashes are compared with `timingSafeEqual`.
+- An access token lives 15 minutes; a refresh token works once, and reusing one
+  revokes the session. An admin session ends 12 hours after sign-in, a customer
+  session after 30 days, however often it is refreshed.
+- Sign-in and activation are limited (in memory, per process): 5 failures per email
+  and IP in 15 minutes, 20 per email in an hour, 30 attempts per IP in 15 minutes.
+  Attempts are counted before the password check, and the client IP comes from
+  `X-Forwarded-For` only through the proxies `TRUST_PROXY` names. At most 4 scrypt
+  runs at once (N=2^15, r=8, p=1); admin passwords need 14
+  characters. Sign-in errors never say whether the email exists.
+- Tokens, passwords and activation codes are redacted from logs
+  (`create-logger.module.ts`), accepted only in the header or the auth bodies,
+  and never returned except at sign-in.
+- The mobile app never calls `/api/v1/admin`.
 
 ### The QR code, restated
 
@@ -1497,12 +1484,12 @@ imported by `AppModule.forRoot(config, tables)`, which receives an
 | `InMemoryTableRepository` | Tests only; one shared contract suite runs against both implementations                                                                                                            |
 | `TableRegistry`           | The admin operations (create, list, get, update, link). Used by the admin controller **and** the `table:create` command                                                            |
 | `TablesService`           | The public view of a table: registration data plus `mode`/`connection` read from the driver on every request                                                                       |
-| `AdminKeyGuard`           | The `ADMIN_API_KEY` check, applied to the whole admin controller                                                                                                                   |
+| `SessionGuard`            | From `auth/`: with `@Roles('admin')`, applied to the whole admin controller                                                                                                        |
 | `ACTIVE_JOB_LOOKUP`       | **The seam to jobs.** `tables` knows only this one-method interface; `NoActiveJobs` answers `null` until the jobs module provides the real one, so `activeJobId` is `null` for now |
 
 Behaviours worth knowing:
 
-- The admin guard accepts `Authorization: Bearer <key>` with the scheme in any
+- The session guard accepts `Authorization: Bearer <token>` with the scheme in any
   letter case (as HTTP defines it) and a single non-blank token. It runs
   **before** validation, so an unauthenticated caller learns nothing about what a
   valid request looks like, and it sets `WWW-Authenticate: Bearer` itself.
@@ -1636,7 +1623,7 @@ requirement.
 | #   | Decision                            | Current proposal in this document                                                                                                                                                                                                                                                                                                                                                                                                                    | Settled by           |
 | --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
 | 1   | Trajectory format                   | **Home radius (provisional): the centre, `HOME_RHO = 0`.** `polar-theta-rho/v1`: unwrapped theta, rho normalised to table radius, polar-linear interpolation                                                                                                                                                                                                                                                                                         | Mechanics choice     |
-| 2   | Access control                      | Public endpoints: none in this milestone; simulation only; mandatory before any hardware driver. (Admin endpoints are protected by `ADMIN_API_KEY`; see decision 18.) Candidates: pairing proof at the table, signed rotating QR, accounts. **Without access control, any visitor can pause or stop another visitor's drawing** (see decision 10); this must be addressed together with access control, not separately                               | Product and security |
+| 2   | Access control                      | Public endpoints: none in this milestone; simulation only; mandatory before any hardware driver. (Admin endpoints require an admin session; see decision 18.) Candidates: pairing proof at the table, signed rotating QR, accounts. **Without access control, any visitor can pause or stop another visitor's drawing** (see decision 10); this must be addressed together with access control, not separately                                       | Product and security |
 | 3   | Hosting and domain                  | A static install page and `.well-known` files on one HTTPS domain; where the API is hosted is not decided. The domain is also `PUBLIC_LINK_BASE_URL`, baked into every printed QR code, so it must be stable for the life of the products                                                                                                                                                                                                            | Product and ops      |
 | 4   | Real-time transport                 | Poll `GET /jobs/:jobId` about once per second; SSE or WebSocket later, fed by `drawing-jobs`                                                                                                                                                                                                                                                                                                                                                         | After measuring      |
 | 5   | Hardware transport                  | **Decided:** the command path is phone → backend (over the internet) → table controller, with the simulator standing in for the controller for now; the table connects to the backend over the network and the phone is never in the path. **Open:** the controller hardware, the protocol between gateway and controller, and whether the gateway is its own process (proposed). Absent from the interface; owned by a future `HardwareTableDriver` | Mechanics choice     |
@@ -1652,8 +1639,8 @@ requirement.
 | 15  | Domain error codes in the filter    | Let domain exceptions carry their own `code` (closes gap 3.6)                                                                                                                                                                                                                                                                                                                                                                                        | API team             |
 | 16  | Table-id and link-host policy       | Shared table-id schema; HTTPS links accepted only from an allow-listed host list                                                                                                                                                                                                                                                                                                                                                                     | Product and mobile   |
 | 17  | Languages                           | English and Arabic from the start; RTL-ready layouts; UI strings in translation files; design text localised as `{ en, ar }` (title, description, inspiration note). Open: localising table `displayName`/`location` and source labels, which language is the default, and who writes and reviews the Arabic content                                                                                                                                 | Product              |
-| 18  | Real admin accounts                 | `ADMIN_API_KEY` is a shared secret with no identity, audit trail or per-person revocation; rotation means a redeploy. Real accounts (individual admins, roles, audit log of who registered or disabled which table) replace it before more than a handful of operators exist                                                                                                                                                                         | Product and security |
+| 18  | Real admin accounts                 | **Done (Athar v1, Phase 2):** individual admin accounts with sessions replaced the shared key. Still open: an audit log of who registered or disabled which table                                                                                                                                                                                                                                                                                    | Product and security |
 | 19  | Production database (PostgreSQL)    | Tables in a JSON file (single instance, atomic rename), jobs in memory, for this milestone. PostgreSQL is the expected production store (multi-instance, queries, migrations, job history that survives restarts); retention, backup and migration policy settled first, as in `future-infrastructure-decisions.md`. The repository interfaces are the seam                                                                                          | Product and ops      |
 | 20  | QR library and artwork              | `qrcode` (plain JavaScript, SVG and PNG from one API), level Q, 4-module quiet zone; licence (MIT) and maintenance (last release August 2024) verified, see "QR generation CLI". Branded or logo-bearing codes are not proposed, because a logo costs error-correction capacity                                                                                                                                                                      | Product and design   |
-| 21  | Admin exposure and abuse protection | Admin routes share the public host and port and rely on a 32+ character key alone. Open: serving them on a separate host or port, an IP or network allow-list, rate limiting (also needed publicly), and key rotation                                                                                                                                                                                                                                | Product and ops      |
+| 21  | Admin exposure and abuse protection | Admin routes share the public host and port. Sign-in is rate limited per email and IP (in memory). Open: serving admin routes on a separate host or port, an IP or network allow-list, and rate limiting of the public endpoints                                                                                                                                                                                                                     | Product and ops      |
 | 22  | Table retirement                    | No delete endpoint: a table is disabled, because its QR code is already printed and jobs reference its id. Open: what a scan of a retired code should show, and whether ids are ever reissued (proposed: never)                                                                                                                                                                                                                                      | Product              |

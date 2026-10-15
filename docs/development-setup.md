@@ -190,11 +190,27 @@ For a code that a phone's camera can scan, set `PUBLIC_LINK_BASE_URL` in
 
 `table:create` writes the tables file, and only one process may write it, so it
 refuses while the API is running (it says so). To register tables while the API
-is up, use the admin endpoint, with the key from `ADMIN_API_KEY`:
+is up, use the admin endpoint with an admin session.
+
+## Admin account
+
+Admin routes need an admin account. Create one with the API stopped (the command
+writes `apps/api/data/accounts.json` and takes its lock, like `table:create`). It
+prompts twice for the password (14 to 200 characters), hidden; it never takes it
+as an argument. Use `--password-stdin` to pipe it in instead.
 
 ```bash
+pnpm --filter @athar/api admin:create --email you@example.com --name "Your name"
+```
+
+Then, with the API running, sign in and use the access token (it lasts 15 minutes;
+refresh it at `POST /api/v1/auth/refresh` or sign in again):
+
+```bash
+TOKEN=$(curl -s -X POST localhost:3000/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"<your password>"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).accessToken')
 curl -X POST http://localhost:3000/api/v1/admin/tables \
-  -H "Authorization: Bearer $ADMIN_API_KEY" -H "content-type: application/json" \
+  -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
   -d '{"displayName": "Main hall", "location": "Ground floor"}'
 ```
 
@@ -206,11 +222,10 @@ process is gone and carries on.
 
 With the API running (`pnpm dev:api`), the simulated table can be driven by hand. A
 drawing takes minutes at real speed; `SIMULATION_SPEED_FACTOR=20 pnpm dev:api` makes
-it twenty times faster. Set `ADMIN_API_KEY` first (any value, in development).
+it twenty times faster. Get an admin `TOKEN` first ([Admin account](#admin-account)).
 
 ```bash
-KEY=anything-you-like
-curl -s -X POST localhost:3000/api/v1/admin/tables -H "Authorization: Bearer $KEY" \
+curl -s -X POST localhost:3000/api/v1/admin/tables -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"displayName":"Demo","location":"Desk"}'   # note the id
 curl -s localhost:3000/api/v1/tables/<id>
 curl -s localhost:3000/api/v1/designs
@@ -235,8 +250,7 @@ in that window.
 1. **Network.** Put the phone and the computer on the same Wi-Fi. Find the computer's
    LAN address (`ipconfig` on Windows; use the IPv4 address of the Wi-Fi adapter).
    Allow Node through the Windows firewall for private networks if asked.
-2. **API.** In `apps/api/.env` set `ADMIN_API_KEY=anything-you-like`. For quick
-   drawings add `SIMULATION_SPEED_FACTOR=20`. Optionally
+2. **API.** For quick drawings set `SIMULATION_SPEED_FACTOR=20` in `apps/api/.env`. Optionally
    `SIMULATION_FAULT_EVERY_NTH_JOB=3` to see a failed drawing. Start it with
    `pnpm dev:api` (it listens on `0.0.0.0:3000`).
 3. **Register a table, then stop the API** (`table:create` refuses while it runs), or

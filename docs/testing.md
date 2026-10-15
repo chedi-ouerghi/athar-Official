@@ -72,15 +72,19 @@ writes (temporary file in the same directory, renamed over the target, nothing
 left behind, previous contents intact and memory in agreement when the rename
 fails, transient Windows renames retried, leftovers cleaned, concurrent changes
 serialised), and the writer lock (second writer refused, readers allowed, released
-on close, stale lock taken over). The admin guard is tested for every way of
-failing, for the single identical response they all produce, and for never echoing
-a key. Over HTTP: create (server-generated ids, ignored caller ids, validation),
-list, get, partial update, the QR link in both forms, the public endpoint (a
-disabled table returned with `enabled: false`, unknown and invalid ids), a server
-with no key failing closed, and persistence across a restart through the real
-file. Also the environment rules for `ADMIN_API_KEY` and `PUBLIC_LINK_BASE_URL`
-(including that `.env.example` itself is refused in production), log redaction of
-the key, id generation (checked against the RFC 4648 vectors), and both commands
+on close, stale lock taken over). The admin routes are tested for every way of
+failing authentication, for the single identical response they all produce, for
+never echoing a token, and for refusing a customer (`FORBIDDEN`). Over HTTP: create
+(server-generated ids, ignored caller ids, validation), list, get, partial update,
+the QR link in both forms, the public endpoint (a disabled table returned with
+`enabled: false`, unknown and invalid ids), and persistence of tables, accounts
+and sessions across a restart through the real files. Accounts and sessions
+(`src/auth`, `test/auth.e2e.spec.ts`): scrypt round trip, token hashing, refresh
+rotation and reuse revoking the session, expiry and the absolute session limit on
+a fake clock, the sign-in throttle, one answer for every sign-in failure,
+activation (single use, 72 h), and `admin:create` (never a password argument,
+respects the lock). Also the environment rules for `PUBLIC_LINK_BASE_URL`, log
+redaction of tokens, passwords and codes, id generation (checked against the RFC 4648 vectors), and both commands
 (`table:qr` writes a real SVG and a PNG of at least 1024 px; `table:create` shares
 the service and respects the lock).
 

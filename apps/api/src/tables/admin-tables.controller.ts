@@ -10,19 +10,20 @@ import {
   type UpdateTableRequest,
 } from '@athar/contracts';
 import type { z } from 'zod';
+import { SessionGuard, Roles } from '../auth/session.guard.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
-import { AdminKeyGuard } from './admin-key.guard.js';
 import { TableRegistry } from './table-registry.service.js';
 
 /**
  * Table provisioning, `/api/v1/admin/tables`.
  *
- * The guard is on the class, so a route added here is protected unless someone
- * deliberately moves it out. It runs before validation: an unauthenticated
- * caller learns nothing about what a valid request looks like.
+ * The guard and the role are on the class, so a route added here is admin-only
+ * unless someone deliberately moves it out. The guard runs before validation:
+ * an unauthenticated caller learns nothing about what a valid request looks like.
  */
 @Controller('admin/tables')
-@UseGuards(AdminKeyGuard)
+@UseGuards(SessionGuard)
+@Roles('admin')
 export class AdminTablesController {
   constructor(private readonly registry: TableRegistry) {}
 

@@ -12,7 +12,7 @@ import {
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InMemoryTableRepository } from '../src/tables/in-memory-table.repository.js';
-import { TEST_ADMIN_KEY, createTimedApp, type TimedApp } from './create-test-app.js';
+import { bearer, createTimedApp, signIn, type TimedApp } from './create-test-app.js';
 import { fixtureTables } from './table-fixtures.js';
 
 /**
@@ -23,8 +23,6 @@ import { fixtureTables } from './table-fixtures.js';
  * Time is a fake clock and the speed factor is 100, so a five-minute design takes
  * three seconds of fake time, advanced by hand: nothing here waits.
  */
-
-const ADMIN = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
 
 let current: TimedApp | undefined;
 
@@ -39,15 +37,19 @@ function client(timed: TimedApp) {
   const job = (body: unknown): DrawingJob => drawingJobSchema.parse(body);
   const errorOf = (body: unknown) => apiErrorResponseSchema.parse(body).error;
 
+  // A fresh admin session each time: the fake clock may have outlived the last one.
+  const admin = async () => bearer(await signIn(timed.app));
+
   return {
     http,
     job,
     errorOf,
+    admin,
 
     async createTable(overrides: Record<string, unknown> = {}): Promise<string> {
       const response = await http()
         .post('/api/v1/admin/tables')
-        .set(ADMIN)
+        .set(await admin())
         .send({ displayName: 'Main hall', location: 'Ground floor', ...overrides })
         .expect(201);
 
@@ -358,7 +360,7 @@ describe('when things go wrong', () => {
     await api
       .http()
       .patch(`/api/v1/admin/tables/${tableId}`)
-      .set(ADMIN)
+      .set(await api.admin())
       .send({ enabled: false })
       .expect(200);
 

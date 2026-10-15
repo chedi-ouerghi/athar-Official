@@ -8,7 +8,7 @@
  */
 
 import { resolve } from 'node:path';
-import type { Environment } from './environment.schema.js';
+import { parseTrustProxy, type Environment } from './environment.schema.js';
 
 /** Fully resolved runtime configuration. */
 export interface AppConfig {
@@ -31,11 +31,12 @@ export interface AppConfig {
   readonly jobHistoryLimit: number;
   /** Absolute path of the JSON file that stores registered tables. */
   readonly tablesDataFile: string;
-  /**
-   * Secret for the admin endpoints, or undefined (development and test only),
-   * in which case they refuse everyone. **Never log this object whole.**
-   */
-  readonly adminApiKey: string | undefined;
+  /** Absolute path of the JSON file that stores accounts. */
+  readonly accountsDataFile: string;
+  /** Absolute path of the JSON file that stores sessions. */
+  readonly sessionsDataFile: string;
+  /** Express `trust proxy`: hop count or proxy addresses; undefined trusts none. */
+  readonly trustProxy: number | string[] | undefined;
   /** Origin for QR links, without a trailing slash; undefined in development. */
   readonly publicLinkBaseUrl: string | undefined;
   readonly serviceName: string;
@@ -64,7 +65,10 @@ export function createAppConfig(environment: Environment, serviceVersion: string
     simulationFaultAtProgress: environment.SIMULATION_FAULT_AT_PROGRESS,
     jobHistoryLimit: environment.JOB_HISTORY_LIMIT,
     tablesDataFile: resolve(environment.TABLES_DATA_FILE),
-    adminApiKey: environment.ADMIN_API_KEY,
+    accountsDataFile: resolve(environment.ACCOUNTS_DATA_FILE),
+    sessionsDataFile: resolve(environment.SESSIONS_DATA_FILE),
+    trustProxy:
+      environment.TRUST_PROXY === undefined ? undefined : parseTrustProxy(environment.TRUST_PROXY),
     publicLinkBaseUrl: environment.PUBLIC_LINK_BASE_URL,
     serviceName: 'athar-api',
     serviceVersion,

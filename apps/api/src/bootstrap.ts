@@ -12,6 +12,8 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { API_PREFIX } from '@athar/contracts';
 import { AppModule } from './app.module.js';
 import type { AppConfig } from './config/app-config.js';
+import { AccountRepository } from './auth/account.repository.js';
+import { SessionRepository } from './auth/session.repository.js';
 import { JsonFileTableRepository } from './tables/json-file-table.repository.js';
 import type { AppModuleOptions } from './app.module.js';
 
@@ -94,36 +96,41 @@ export async function createConfiguredApp(
   config: AppConfig,
   overrides: Partial<AppModuleOptions> = {},
 ): Promise<NestExpressApplication> {
-  // The tables file is opened (and validated) before Nest starts, so a corrupt
+  // The data files are opened (and validated) before Nest starts, so a corrupt
   // file stops the process with a readable message instead of a Nest init
-  // failure. Tests pass a repository of their own and never touch the disk.
-  const ownedRepository =
-    overrides.repository === undefined
-      ? await JsonFileTableRepository.open(config.tablesDataFile)
-      : undefined;
+  // failure. Tests pass repositories of their own and never touch the disk.
+  const owned: { close(): Promise<void> }[] = [];
+  const own = async <T extends { close(): Promise<void> }>(opening: Promise<T>): Promise<T> => {
+    const repository = await opening;
+    owned.push(repository);
+    return repository;
+  };
 
   try {
     return await buildApp(config, {
       ...overrides,
-      repository: overrides.repository ?? (ownedRepository as JsonFileTableRepository),
+      repository:
+        overrides.repository ?? (await own(JsonFileTableRepository.open(config.tablesDataFile))),
+      accounts: overrides.accounts ?? (await own(AccountRepository.open(config.accountsDataFile))),
+      sessions: overrides.sessions ?? (await own(SessionRepository.open(config.sessionsDataFile))),
     });
   } catch (error) {
-    // The application never came up, so nothing else will release the file lock.
-    await ownedRepository?.close();
+    // The application never came up, so nothing else will release the file locks.
+    await Promise.all(owned.map((repository) => repository.close()));
     throw error;
   }
 }
 
 async function buildApp(
   config: AppConfig,
-  tables: AppModuleOptions,
+  options: AppModuleOptions,
 ): Promise<NestExpressApplication> {
   // `bufferLogs` holds everything Nest logs while the container is being built
   // and replays it through pino once `useLogger` installs it, so no line (not
   // even "Starting Nest application...") escapes as unformatted text. From then
   // on every `new Logger(...)` in the codebase writes through pino, which
   // makes LOG_LEVEL, redaction and JSON output apply to application logs too.
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config, tables), {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config, options), {
     bufferLogs: true,
   });
   app.useLogger(app.get(PinoLogger));
@@ -135,6 +142,12 @@ async function buildApp(
   });
 
   app.useBodyParser('json', { limit: MAX_JSON_BODY_SIZE });
+
+  // `req.ip`, which the sign-in throttle keys on, comes from X-Forwarded-For only
+  // through the proxies TRUST_PROXY names; otherwise it is the socket's address.
+  if (config.trustProxy !== undefined) {
+    app.set('trust proxy', config.trustProxy);
+  }
   app.setGlobalPrefix(API_PREFIX, { exclude: [...UNPREFIXED_PROBES] });
   app.enableVersioning({
     type: VersioningType.URI,
@@ -163,7 +176,7 @@ export async function createApp(
     await app.listen(config.port, config.host);
   } catch (error) {
     // The caller never receives the app (the port is taken, say), so close it
-    // here: that releases the tables file lock. A failed close must not hide why
+    // here: that releases the data file locks. A failed close must not hide why
     // listening failed.
     await app.close().catch((closeError: unknown) => {
       new Logger('Bootstrap').warn(

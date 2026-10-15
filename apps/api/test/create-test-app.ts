@@ -1,5 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { AccountRole, SessionResponse } from '@athar/contracts';
 import type { AppModuleOptions } from '../src/app.module.js';
+import { AccountRepository } from '../src/auth/account.repository.js';
+import { AccountsService } from '../src/auth/accounts.service.js';
+import { AuthService } from '../src/auth/auth.service.js';
+import { SessionRepository } from '../src/auth/session.repository.js';
 import { createConfiguredApp } from '../src/bootstrap.js';
 import { FakeClock, ManualScheduler } from '../src/device/fake-clock.js';
 import type { SimulatedTableDriver } from '../src/device/simulated-table-driver.js';
@@ -9,24 +15,51 @@ import { InMemoryTableRepository } from '../src/tables/in-memory-table.repositor
 import { createTestConfig } from './create-test-config.js';
 import { fixtureTables } from './table-fixtures.js';
 
-/** Admin key used by integration tests. Not a secret: it protects nothing real. */
-export const TEST_ADMIN_KEY = 'test-admin-key-0123456789-0123456789-abcdef';
+/** The password of every account the helpers below create. Not a secret. */
+export const TEST_PASSWORD = 'test-password-0123456789';
 
 /**
- * The real application with an in-memory table repository seeded from fixtures,
- * so no test touches the file system or depends on a developer's data file.
- *
- * Pass `ADMIN_API_KEY: undefined` among `environment` to build a server with no
- * admin key configured.
+ * The real application with in-memory repositories (tables seeded from
+ * fixtures, no accounts, no sessions), so no test touches the file system or
+ * depends on a developer's data files.
  */
 export function createTestApp(
   environment: Record<string, unknown> = {},
   options: Partial<AppModuleOptions> = {},
 ): Promise<NestExpressApplication> {
-  return createConfiguredApp(createTestConfig({ ADMIN_API_KEY: TEST_ADMIN_KEY, ...environment }), {
+  return createConfiguredApp(createTestConfig(environment), {
     ...options,
     repository: options.repository ?? new InMemoryTableRepository(fixtureTables()),
+    accounts: options.accounts ?? AccountRepository.inMemory(),
+    sessions: options.sessions ?? SessionRepository.inMemory(),
   });
+}
+
+/**
+ * Create an account of `role` in a running application and sign it in, through
+ * the real services: an admin as `admin:create` makes one, a customer with an
+ * activation code as an admin would hand it out. Returns the session.
+ */
+export async function signIn(
+  app: NestExpressApplication,
+  role: AccountRole = 'admin',
+  email = `${role}-${randomUUID()}@athar.test`,
+): Promise<SessionResponse> {
+  const accounts = app.get(AccountsService);
+  const auth = app.get(AuthService);
+
+  if (role === 'admin') {
+    await accounts.createAdmin({ email, displayName: 'Test admin', password: TEST_PASSWORD });
+    return auth.login({ email, password: TEST_PASSWORD }, 'test');
+  }
+
+  const { activationCode } = await accounts.createCustomer({ email, displayName: 'Test customer' });
+  return auth.activate({ email, activationCode, password: TEST_PASSWORD }, 'test');
+}
+
+/** The header that carries a session's access token. */
+export function bearer(session: Pick<SessionResponse, 'accessToken'>): { Authorization: string } {
+  return { Authorization: `Bearer ${session.accessToken}` };
 }
 
 /**

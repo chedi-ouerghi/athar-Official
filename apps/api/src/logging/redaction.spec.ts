@@ -19,26 +19,27 @@ function logged(entry: Record<string, unknown>): string {
   return output;
 }
 
-const KEY = 'the-real-admin-key-0123456789-abcdef';
+const SECRET = 'the-real-secret-0123456789-abcdef';
 
 describe('log redaction', () => {
-  it('hides the Authorization header, where the admin key travels', () => {
-    const output = logged({ req: { headers: { authorization: `Bearer ${KEY}` } } });
+  it('hides the Authorization header, where access tokens travel', () => {
+    const output = logged({ req: { headers: { authorization: `Bearer ${SECRET}` } } });
 
-    expect(output).not.toContain(KEY);
+    expect(output).not.toContain(SECRET);
     expect(output).toContain('[redacted]');
   });
 
-  it('hides the admin key if the configuration object is ever logged by mistake', () => {
-    const config = createTestConfig({ ADMIN_API_KEY: KEY });
+  it.each(['password', 'refreshToken', 'accessToken', 'activationCode'])(
+    'hides %s in a request body, at the top level and one level down',
+    (field) => {
+      expect(logged({ req: { body: { [field]: SECRET } } })).not.toContain(SECRET);
+      expect(logged({ [field]: SECRET })).not.toContain(SECRET);
+      expect(logged({ body: { [field]: SECRET } })).not.toContain(SECRET);
+    },
+  );
 
-    expect(config.adminApiKey).toBe(KEY);
-    expect(logged({ adminApiKey: config.adminApiKey })).not.toContain(KEY);
-    expect(logged({ config })).not.toContain(KEY);
-    expect(logged({ appConfig: { nested: 1 }, wrapper: { adminApiKey: KEY } })).not.toContain(KEY);
-  });
-
-  it('still logs everything else in the configuration', () => {
+  it('still logs everything else', () => {
     expect(logged({ config: createTestConfig({ PORT: '4321' }) })).toContain('4321');
+    expect(logged({ req: { body: { email: 'a@b.co' } } })).toContain('a@b.co');
   });
 });

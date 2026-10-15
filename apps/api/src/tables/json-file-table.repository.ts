@@ -5,41 +5,16 @@
  * { "version": 1, "tables": [ { "id": "...", "displayName": "...", ... } ] }
  * ```
  *
- * Guarantees, from docs/architecture.md ("Table persistence: JSON file"):
- *
- * - **Validated on load.** The file is parsed and checked against a Zod schema.
- *   A corrupt file, an unknown version or duplicate ids fail startup with a
- *   readable error, and the file is never overwritten.
- * - **Atomic writes.** Each change is written to a temporary file *in the same
- *   directory*, flushed to disk, then renamed over the real file. A crash leaves
- *   the old file or the new one, never half of one. The same directory is what
- *   makes the rename atomic.
- * - **One writer at a time.** Changes run through a queue, and memory is
- *   replaced only after the rename succeeded, so a failed write leaves memory
- *   and disk in agreement.
- * - **One writing process.** A second process writing the file would silently
- *   discard the first one's changes, so a writer holds a lock file
- *   (`<file>.lock`, containing `<pid>:<hostname>`) for as long as it is open. A
- *   lock left on this host by a process that no longer exists is taken over, and
- *   so is one naming this process's own pid that this process does not hold (a
- *   container restarting as PID 1 finds the lock of its previous run). A lock
- *   from another host (a shared volume) cannot be checked, so it is refused. A
- *   lock holding only a pid, from an older build, counts as this host's.
- *   Read-only opens take no lock, and are safe at any time because the file is
- *   only ever replaced atomically.
+ * Validation, atomic writes, the write queue and the writer lock come from
+ * {@link JsonFileStore}; see its documentation for the guarantees.
  *
  * The file holds registration data only: no secrets, no personal data, no jobs.
  * It is a single-instance store; a database is an open decision.
  */
 
-import { Logger } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises';
-import { hostname } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { adminTableSchema } from '@athar/contracts';
-import { StartupConfigurationError } from '../config/startup-configuration.error.js';
+import { JsonFileStore, type FileOperations } from '../common/persistence/json-file-store.js';
 import {
   TableAlreadyExistsError,
   applyPatch,
@@ -48,34 +23,26 @@ import {
   type TableRepository,
 } from './table-repository.js';
 
+export type { FileOperations } from '../common/persistence/json-file-store.js';
+
 /** The only file format version this build reads and writes. */
 export const TABLES_FILE_VERSION = 1;
 
-const tablesFileSchema = z
-  .object({
-    version: z.literal(TABLES_FILE_VERSION),
-    tables: z.array(adminTableSchema),
-  })
-  .superRefine((file, context) => {
-    const seen = new Set<string>();
+const tablesSchema = z.array(adminTableSchema).superRefine((tables, context) => {
+  const seen = new Set<string>();
 
-    for (const [index, table] of file.tables.entries()) {
-      if (seen.has(table.id)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['tables', index, 'id'],
-          message: `duplicate table id ${table.id}`,
-        });
-      }
-
-      seen.add(table.id);
+  for (const [index, table] of tables.entries()) {
+    if (seen.has(table.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: [index, 'id'],
+        message: `duplicate table id ${table.id}`,
+      });
     }
-  });
 
-/** The file-system calls the repository makes, replaceable so tests can make them fail. */
-export interface FileOperations {
-  rename(from: string, to: string): Promise<void>;
-}
+    seen.add(table.id);
+  }
+});
 
 export interface OpenOptions {
   /**
@@ -86,65 +53,8 @@ export interface OpenOptions {
   readonly fileOperations?: FileOperations;
 }
 
-/** Renames that fail transiently on Windows while another process has the target open. */
-const TRANSIENT_RENAME_ERRORS = new Set(['EPERM', 'EBUSY', 'EACCES']);
-const RENAME_ATTEMPTS = 5;
-const RENAME_RETRY_DELAY_MS = 25;
-
-function errorCode(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error
-    ? String(error.code)
-    : undefined;
-}
-
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means the process exists but belongs to someone else.
-    return errorCode(error) === 'EPERM';
-  }
-}
-
-/**
- * Lock files this process holds right now. A lock naming this process's pid
- * that is not in here was left by an earlier process that had the same pid.
- */
-const heldLocks = new Set<string>();
-
-/** The key of a lock file in {@link heldLocks}: one spelling per file, even on Windows. */
-function lockKey(lockFile: string): string {
-  const path = resolve(lockFile);
-
-  return process.platform === 'win32' ? path.toLowerCase() : path;
-}
-
-function unusable(file: string, reason: string): StartupConfigurationError {
-  return new StartupConfigurationError(
-    `TABLES_DATA_FILE ${file} cannot be used: ${reason}\nThe file has not been modified.`,
-  );
-}
-
 export class JsonFileTableRepository implements TableRepository {
-  private readonly logger = new Logger(JsonFileTableRepository.name);
-  private readonly fileOperations: FileOperations;
-  private queue: Promise<unknown> = Promise.resolve();
-  private closed = false;
-
-  private constructor(
-    private readonly file: string,
-    private tables: readonly TableRecord[],
-    private readonly readOnly: boolean,
-    private readonly lockFile: string | undefined,
-    fileOperations: FileOperations | undefined,
-  ) {
-    this.fileOperations = fileOperations ?? { rename };
-  }
+  private constructor(private readonly store: JsonFileStore<TableRecord>) {}
 
   /**
    * Load the file, creating it (and its directory) first if it is missing.
@@ -153,64 +63,22 @@ export class JsonFileTableRepository implements TableRepository {
    *   unknown version, or is open for writing in another process.
    */
   static async open(file: string, options: OpenOptions = {}): Promise<JsonFileTableRepository> {
-    const readOnly = options.readOnly ?? false;
-    const lockFile = readOnly ? undefined : `${file}.lock`;
-
-    if (!readOnly) {
-      try {
-        await mkdir(dirname(file), { recursive: true });
-      } catch (error) {
-        throw unusable(
-          file,
-          `its directory could not be created (${errorCode(error) ?? 'unknown error'}).`,
-        );
-      }
-
-      await JsonFileTableRepository.acquireLock(file, `${file}.lock`);
-    }
-
-    try {
-      if (!readOnly) {
-        await JsonFileTableRepository.removeLeftoverTemporaryFiles(file);
-      }
-
-      const loaded = await JsonFileTableRepository.load(file);
-      const repository = new JsonFileTableRepository(
-        file,
-        loaded ?? [],
-        readOnly,
-        lockFile,
-        options.fileOperations,
-      );
-
-      if (loaded === undefined && !readOnly) {
-        await repository.persist([]);
-      }
-
-      return repository;
-    } catch (error) {
-      if (lockFile !== undefined) {
-        await unlink(lockFile).catch(() => undefined);
-        heldLocks.delete(lockKey(lockFile));
-      }
-
-      throw error;
-    }
+    return new JsonFileTableRepository(
+      await JsonFileStore.open(file, {
+        ...options,
+        setting: 'TABLES_DATA_FILE',
+        key: 'tables',
+        version: TABLES_FILE_VERSION,
+        schema: tablesSchema,
+        busyHint:
+          'Only one process may write the tables file at a time: stop the API before running a command that changes tables, or use the admin endpoints instead.',
+      }),
+    );
   }
 
   /** Wait for pending writes, then release the lock. Safe to call twice. */
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-
-    this.closed = true;
-    await this.queue.catch(() => undefined);
-
-    if (this.lockFile !== undefined) {
-      await unlink(this.lockFile).catch(() => undefined);
-      heldLocks.delete(lockKey(this.lockFile));
-    }
+  close(): Promise<void> {
+    return this.store.close();
   }
 
   /** Nest calls this when the application closes. */
@@ -219,227 +87,39 @@ export class JsonFileTableRepository implements TableRepository {
   }
 
   list(): Promise<readonly TableRecord[]> {
-    return Promise.resolve(this.tables.map((table) => ({ ...table })));
+    return Promise.resolve(this.store.records.map((table) => ({ ...table })));
   }
 
   get(tableId: string): Promise<TableRecord | undefined> {
-    const table = this.tables.find((candidate) => candidate.id === tableId);
+    const table = this.store.records.find((candidate) => candidate.id === tableId);
 
     return Promise.resolve(table === undefined ? undefined : { ...table });
   }
 
   create(record: TableRecord): Promise<void> {
-    return this.enqueue(async () => {
-      if (this.tables.some((table) => table.id === record.id)) {
+    return this.store.change((tables) => {
+      if (tables.some((table) => table.id === record.id)) {
         throw new TableAlreadyExistsError(record.id);
       }
 
-      const next = [...this.tables, { ...record }];
-
-      await this.persist(next);
-      this.tables = next;
+      return { next: [...tables, { ...record }], result: undefined };
     });
   }
 
   update(tableId: string, patch: TablePatch): Promise<TableRecord | undefined> {
-    return this.enqueue(async () => {
-      const existing = this.tables.find((table) => table.id === tableId);
+    return this.store.change((tables) => {
+      const existing = tables.find((table) => table.id === tableId);
 
       if (existing === undefined) {
-        return undefined;
+        return { result: undefined };
       }
 
       const updated = applyPatch(existing, patch);
-      const next = this.tables.map((table) => (table.id === tableId ? updated : table));
 
-      await this.persist(next);
-      this.tables = next;
-
-      return { ...updated };
+      return {
+        next: tables.map((table) => (table.id === tableId ? updated : table)),
+        result: { ...updated },
+      };
     });
-  }
-
-  // -------------------------------------------------------------------------
-  // Internals
-  // -------------------------------------------------------------------------
-
-  /** Run changes one at a time, in order, even if an earlier one failed. */
-  private enqueue<T>(task: () => Promise<T>): Promise<T> {
-    if (this.readOnly) {
-      return Promise.reject(new Error('This table repository was opened read-only.'));
-    }
-
-    if (this.closed) {
-      return Promise.reject(new Error('This table repository is closed.'));
-    }
-
-    const result = this.queue.then(task);
-    this.queue = result.catch(() => undefined);
-
-    return result;
-  }
-
-  /** Write the whole document atomically: temporary file, flush, rename. */
-  private async persist(tables: readonly TableRecord[]): Promise<void> {
-    const document = JSON.stringify({ version: TABLES_FILE_VERSION, tables }, null, 2) + '\n';
-    const temporary = `${this.file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-
-    try {
-      const handle = await open(temporary, 'w');
-
-      try {
-        await handle.writeFile(document, 'utf8');
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-
-      await this.renameWithRetry(temporary, this.file);
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
-  }
-
-  private async renameWithRetry(from: string, to: string): Promise<void> {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        await this.fileOperations.rename(from, to);
-        return;
-      } catch (error) {
-        const code = errorCode(error);
-
-        if (
-          attempt >= RENAME_ATTEMPTS ||
-          code === undefined ||
-          !TRANSIENT_RENAME_ERRORS.has(code)
-        ) {
-          throw error;
-        }
-
-        await sleep(RENAME_RETRY_DELAY_MS * attempt);
-      }
-    }
-  }
-
-  /** Returns the stored tables, or `undefined` if the file does not exist. */
-  private static async load(file: string): Promise<readonly TableRecord[] | undefined> {
-    let text: string;
-
-    try {
-      text = await readFile(file, 'utf8');
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') {
-        return undefined;
-      }
-
-      throw unusable(file, `it could not be read (${errorCode(error) ?? 'unknown error'}).`);
-    }
-
-    let json: unknown;
-
-    try {
-      json = JSON.parse(text) as unknown;
-    } catch {
-      throw unusable(file, 'it is not valid JSON.');
-    }
-
-    const version =
-      typeof json === 'object' && json !== null
-        ? (json as { version?: unknown }).version
-        : undefined;
-
-    if (typeof version === 'number' && version !== TABLES_FILE_VERSION) {
-      throw unusable(
-        file,
-        `it has version ${version}, but this build only understands version ${TABLES_FILE_VERSION}.`,
-      );
-    }
-
-    const parsed = tablesFileSchema.safeParse(json);
-
-    if (!parsed.success) {
-      const reasons = parsed.error.issues
-        .slice(0, 5)
-        .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-        .join('; ');
-
-      throw unusable(file, `it does not have the expected structure (${reasons}).`);
-    }
-
-    return parsed.data.tables;
-  }
-
-  /** Delete temporary files a crashed writer left behind. They are never read. */
-  private static async removeLeftoverTemporaryFiles(file: string): Promise<void> {
-    const directory = dirname(file);
-    const prefix = `${basename(file)}.`;
-    const pattern = /^\d+\.[0-9a-f]+\.tmp$/;
-
-    for (const name of await readdir(directory)) {
-      if (name.startsWith(prefix) && pattern.test(name.slice(prefix.length))) {
-        await unlink(`${directory}/${name}`).catch(() => undefined);
-      }
-    }
-  }
-
-  /** Take the writer lock, or explain who holds it. */
-  private static async acquireLock(file: string, lockFile: string): Promise<void> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const handle = await open(lockFile, 'wx');
-
-        try {
-          await handle.writeFile(`${process.pid}:${hostname()}`, 'utf8');
-        } finally {
-          await handle.close();
-        }
-
-        heldLocks.add(lockKey(lockFile));
-        return;
-      } catch (error) {
-        if (errorCode(error) !== 'EEXIST') {
-          throw unusable(
-            file,
-            `the lock file could not be created (${errorCode(error) ?? 'unknown error'}).`,
-          );
-        }
-      }
-
-      // `<pid>:<hostname>`, or a bare pid from an older build, which is this host's.
-      const [pidText = '', host = hostname()] = (await readFile(lockFile, 'utf8').catch(() => ''))
-        .trim()
-        .split(':');
-      const holder = Number.parseInt(pidText, 10);
-
-      if (!Number.isInteger(holder) || holder <= 0) {
-        throw unusable(
-          file,
-          `its lock file ${lockFile} exists but does not name a process. If no API or command is running, delete the lock file.`,
-        );
-      }
-
-      if (host !== hostname()) {
-        throw unusable(
-          file,
-          `it is open for writing by process ${holder} on host ${host}, which cannot be checked from here. If no API or command is running there, delete the lock file ${lockFile}.`,
-        );
-      }
-
-      if (
-        // Our own pid in a lock we do not hold is left over from an earlier run (PID 1 in a container).
-        holder === process.pid ? heldLocks.has(lockKey(lockFile)) : processIsAlive(holder)
-      ) {
-        throw unusable(
-          file,
-          `it is open for writing by process ${holder}. Only one process may write the tables file at a time: stop the API before running a command that changes tables, or use the admin endpoints instead.`,
-        );
-      }
-
-      // The holder is gone: the lock is left over from a crash. Take it over.
-      await unlink(lockFile).catch(() => undefined);
-    }
-
-    throw unusable(file, `its lock file ${lockFile} could not be taken over.`);
   }
 }

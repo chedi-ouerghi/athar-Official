@@ -1,6 +1,5 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { CLOCK, systemClock, type Clock } from '../device/clock.js';
-import { AdminKeyGuard } from './admin-key.guard.js';
 import { AdminTablesController } from './admin-tables.controller.js';
 import { generateTableId } from './table-id.js';
 import { TABLE_REPOSITORY, type TableRepository } from './table-repository.js';
@@ -40,7 +39,6 @@ export class TablesModule {
         { provide: TABLE_REPOSITORY, useValue: options.repository },
         { provide: CLOCK, useValue: options.clock ?? systemClock },
         { provide: TABLE_ID_GENERATOR, useValue: options.generateId ?? generateTableId },
-        AdminKeyGuard,
         TableRegistry,
         TablesService,
       ],

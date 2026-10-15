@@ -34,8 +34,16 @@ const MESSAGE_BY_CODE: Readonly<Record<ApiErrorCode, ErrorMessageKey>> = {
   // The app reuses a request id only for a retry of the same design, so this
   // means the app misbehaved; nothing the visitor can act on.
   IDEMPOTENCY_CONFLICT: 'error.generic',
-  // Only admin endpoints answer this, and the app never calls them.
+  // Sign-in, ownership and plans: the screens that can meet these (Phase 6)
+  // bring their own messages.
   UNAUTHORIZED: 'error.generic',
+  INVALID_CREDENTIALS: 'error.generic',
+  SESSION_EXPIRED: 'error.generic',
+  FORBIDDEN: 'error.generic',
+  TOO_MANY_REQUESTS: 'error.generic',
+  ACTIVATION_INVALID: 'error.generic',
+  PAIRING_REQUIRED: 'error.generic',
+  FEATURE_NOT_IN_PLAN: 'error.generic',
 };
 
 /** Failures that never reached a JSON error from the API. */

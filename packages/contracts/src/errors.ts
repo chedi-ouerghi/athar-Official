@@ -28,8 +28,16 @@ export const apiErrorCodeSchema = z.enum([
   'TABLE_BUSY',
   'INVALID_TRANSITION',
   'IDEMPOTENCY_CONFLICT',
-  // Admin endpoints: missing or wrong admin key.
+  // Accounts and sessions.
   'UNAUTHORIZED',
+  'INVALID_CREDENTIALS',
+  'SESSION_EXPIRED',
+  'FORBIDDEN',
+  'TOO_MANY_REQUESTS',
+  'ACTIVATION_INVALID',
+  // Ownership and plans.
+  'PAIRING_REQUIRED',
+  'FEATURE_NOT_IN_PLAN',
 ]);
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 

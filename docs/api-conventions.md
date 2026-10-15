@@ -112,15 +112,34 @@ body, a bare `HttpException`) keep their existing mapping, so a bare 409 is stil
 and answered with `An unexpected error occurred.` A raw message can embed file
 paths or connection strings.
 
-## Admin endpoints
+## Sessions
 
-Everything under `/api/v1/admin` requires `Authorization: Bearer <ADMIN_API_KEY>`.
-Any failure to authenticate (no header, wrong scheme, wrong key, or a server with
-no key configured) is the same response: `401`, code `UNAUTHORIZED`, the message
-"Authentication is required.", and `WWW-Authenticate: Bearer`. The check runs
-before request validation. Throw `DomainException('UNAUTHORIZED', ...)` from any
-future guard in the same way. Public endpoints never return `UNAUTHORIZED`. See
-[architecture.md](architecture.md#admin-authentication).
+Sign in with `POST /api/v1/auth/login` (`{email, password}`) or, the first time,
+`POST /api/v1/auth/activate` (`{email, activationCode, password}`). Both return
+`{accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt, account}`.
+Send `Authorization: Bearer <accessToken>` (header only, never URL or body) to
+`GET /api/v1/auth/me`, `POST /api/v1/auth/logout` (`204`) and everything under
+`/api/v1/admin` (role `admin`). Exchange the refresh token at
+`POST /api/v1/auth/refresh` (`{refreshToken}`) for a new pair; each refresh token
+works once. Other public endpoints need no session yet.
+
+| Code                  | Status | Meaning                                                                                                            |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| `UNAUTHORIZED`        | 401    | No `Bearer` token, or one the server does not know                                                                 |
+| `SESSION_EXPIRED`     | 401    | Token expired or revoked, or a refresh failed: refresh, else sign in                                               |
+| `INVALID_CREDENTIALS` | 401    | Sign-in failed; same answer whether or not the email exists                                                        |
+| `ACTIVATION_INVALID`  | 400    | Wrong, used or expired activation code; same answer for an unknown email                                           |
+| `FORBIDDEN`           | 403    | Signed in, but the role may not use the route                                                                      |
+| `TOO_MANY_REQUESTS`   | 429    | Too many attempts: 5 failures per email and IP in 15 min, 20 per email in an hour, or 30 attempts per IP in 15 min |
+| `PAIRING_REQUIRED`    | 409    | Reserved for table pairing (later phase)                                                                           |
+| `FEATURE_NOT_IN_PLAN` | 403    | Reserved for plan entitlements (later phase)                                                                       |
+
+Reusing a refresh token revokes the whole session, including when a client retries
+a refresh whose answer it never received. The app treats `SESSION_EXPIRED` from
+`/auth/refresh` as "sign in again"; there is no grace window.
+
+Every `401` carries `WWW-Authenticate: Bearer`. The guard runs before request
+validation. See [architecture.md](architecture.md#admin-authentication).
 
 ## Correlation ids
 
