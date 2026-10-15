@@ -35,6 +35,7 @@ export const apiErrorCodeSchema = z.enum([
   'FORBIDDEN',
   'TOO_MANY_REQUESTS',
   'ACTIVATION_INVALID',
+  'ACCOUNT_EXISTS',
   // Ownership and plans.
   'PAIRING_REQUIRED',
   'FEATURE_NOT_IN_PLAN',

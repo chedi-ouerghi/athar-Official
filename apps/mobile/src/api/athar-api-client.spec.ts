@@ -72,6 +72,9 @@ const TABLE = {
   mode: 'simulation',
   connection: 'online',
   activeJobId: null,
+  plan: 'basic',
+  voiceAssistant: false,
+  features: ['catalogue', 'rake'],
 };
 
 const DESIGN_SUMMARY = {

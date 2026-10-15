@@ -12,6 +12,7 @@ export * from './auth.js';
 export * from './design.js';
 export * from './device.js';
 export * from './drawing-job.js';
+export * from './entitlements.js';
 export * from './errors.js';
 export * from './health.js';
 export * from './polar-path.js';

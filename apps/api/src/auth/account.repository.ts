@@ -96,6 +96,11 @@ export class AccountRepository {
     return Promise.resolve(this.store.records.find((account) => account.email === email));
   }
 
+  /** Every account, oldest first. */
+  list(): Promise<readonly AccountRecord[]> {
+    return Promise.resolve(this.store.records);
+  }
+
   /** @throws AccountAlreadyExistsError if the email is taken. */
   create(record: AccountRecord): Promise<void> {
     return this.store.change((accounts) => {

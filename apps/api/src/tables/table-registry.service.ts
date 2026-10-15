@@ -7,7 +7,7 @@
  */
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { UpdateTableRequest } from '@athar/contracts';
+import type { AuthAccount, Plan, UpdateTableRequest } from '@athar/contracts';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { CLOCK, type Clock } from '../device/clock.js';
 import { DomainException } from '../common/http/domain.exception.js';
@@ -23,11 +23,28 @@ import {
 export const TABLE_ID_GENERATOR = Symbol('TABLE_ID_GENERATOR');
 export type TableIdGenerator = () => string;
 
-/** What registering a table needs; `enabled` has already been defaulted. */
+/**
+ * What registering a table needs; `enabled` has already been defaulted. The
+ * order fields default to no owner, `basic` and no voice assistant.
+ */
 export interface NewTable {
   readonly displayName: string;
   readonly location: string;
   readonly enabled: boolean;
+  readonly ownerAccountId?: string | null;
+  readonly plan?: Plan;
+  readonly voiceAssistant?: boolean;
+}
+
+/** Reading a table (or its jobs), or changing what it does (starting and commanding jobs). */
+export type TableUse = 'read' | 'command';
+
+/**
+ * Who may use a table (decision D1): its owner, for anything; an admin, only to
+ * read. Everyone else is told the table does not exist.
+ */
+export function mayUse(table: TableRecord, account: AuthAccount, use: TableUse): boolean {
+  return table.ownerAccountId === account.id || (use === 'read' && account.role === 'admin');
 }
 
 /** How many times to retry after generating an id that is already taken. */
@@ -54,6 +71,9 @@ export class TableRegistry {
         displayName: input.displayName,
         location: input.location,
         enabled: input.enabled,
+        ownerAccountId: input.ownerAccountId ?? null,
+        plan: input.plan ?? 'basic',
+        voiceAssistant: input.voiceAssistant ?? false,
         createdAt: now,
         updatedAt: now,
       };
@@ -92,7 +112,27 @@ export class TableRegistry {
   }
 
   /**
-   * Change a table's display name, location or `enabled` switch.
+   * The table, if `account` may use it (see {@link mayUse}). One it may not use
+   * is `TABLE_NOT_FOUND`, exactly like a missing one, so ids cannot be probed.
+   *
+   * @throws DomainException `TABLE_NOT_FOUND`
+   */
+  async getFor(
+    tableId: string,
+    account: AuthAccount,
+    use: TableUse = 'read',
+  ): Promise<TableRecord> {
+    const record = await this.repository.get(tableId);
+
+    if (record === undefined || !mayUse(record, account, use)) {
+      throw tableNotFound(tableId);
+    }
+
+    return record;
+  }
+
+  /**
+   * Change a table's display name, location, `enabled` switch or order.
    *
    * @throws DomainException `TABLE_NOT_FOUND`
    */

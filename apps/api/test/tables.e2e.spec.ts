@@ -10,7 +10,7 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { InMemoryTableRepository } from '../src/tables/in-memory-table.repository.js';
-import { bearer, createTestApp, signIn } from './create-test-app.js';
+import { bearer, createTestApp, signIn, signInOwner } from './create-test-app.js';
 import { fixtureTables } from './table-fixtures.js';
 
 const ADMIN = '/api/v1/admin/tables';
@@ -25,11 +25,17 @@ describe('tables over HTTP', () => {
   /** An admin's access token, and the header that carries it. */
   let token: string;
   let admin: { Authorization: string };
+  /** The customer who owns both fixture tables. */
+  let ownerId: string;
+  let owner: { Authorization: string };
 
   beforeAll(async () => {
     app = await createTestApp({}, { repository: new InMemoryTableRepository(fixtureTables()) });
     token = (await signIn(app)).accessToken;
     admin = { Authorization: `Bearer ${token}` };
+    const session = await signInOwner(app, 'table-001', 'table-off');
+    ownerId = session.account.id;
+    owner = bearer(session);
   });
 
   afterAll(async () => {
@@ -38,9 +44,9 @@ describe('tables over HTTP', () => {
 
   const http = () => request(app.getHttpServer());
 
-  describe('GET /api/v1/tables/:tableId (public)', () => {
+  describe('GET /api/v1/tables/:tableId (owner or admin)', () => {
     it('returns the Table shape, with mode and connection from the driver', async () => {
-      const response = await http().get('/api/v1/tables/table-001').expect(200);
+      const response = await http().get('/api/v1/tables/table-001').set(owner).expect(200);
 
       expect(getTableResponseSchema.parse(response.body)).toStrictEqual({
         id: 'table-001',
@@ -50,15 +56,31 @@ describe('tables over HTTP', () => {
         mode: 'simulation',
         connection: 'online',
         activeJobId: null,
+        plan: 'basic',
+        voiceAssistant: false,
+        features: ['catalogue', 'rake'],
       });
     });
 
-    it('needs no credentials', async () => {
-      await http().get('/api/v1/tables/table-001').expect(200);
+    it('needs a session: the QR code identifies the table, it does not authorise', async () => {
+      const response = await http().get('/api/v1/tables/table-001').expect(401);
+
+      expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
+    });
+
+    it('answers TABLE_NOT_FOUND to another customer, exactly as for an unknown table', async () => {
+      const stranger = bearer(await signIn(app, 'customer'));
+      const response = await http().get('/api/v1/tables/table-001').set(stranger).expect(404);
+
+      expect(errorOf(response.body).code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('lets an admin read any table', async () => {
+      await http().get('/api/v1/tables/table-001').set(admin).expect(200);
     });
 
     it('returns a disabled table with enabled: false', async () => {
-      const response = await http().get('/api/v1/tables/table-off').expect(200);
+      const response = await http().get('/api/v1/tables/table-off').set(owner).expect(200);
 
       expect(getTableResponseSchema.parse(response.body)).toMatchObject({
         id: 'table-off',
@@ -67,7 +89,7 @@ describe('tables over HTTP', () => {
     });
 
     it('answers TABLE_NOT_FOUND with the standard envelope for an unknown table', async () => {
-      const response = await http().get('/api/v1/tables/no-such-table').expect(404);
+      const response = await http().get('/api/v1/tables/no-such-table').set(owner).expect(404);
 
       expect(errorOf(response.body)).toMatchObject({ code: 'TABLE_NOT_FOUND' });
     });
@@ -79,16 +101,17 @@ describe('tables over HTTP', () => {
       ['an underscore', 'table_001'],
       ['a percent-encoded space', 'table%20001'],
     ])('answers VALIDATION_FAILED for an invalid id: %s', async (_label, id) => {
-      const response = await http().get(`/api/v1/tables/${id}`).expect(400);
+      const response = await http().get(`/api/v1/tables/${id}`).set(owner).expect(400);
       const error = errorOf(response.body);
 
       expect(error.code).toBe('VALIDATION_FAILED');
       expect(error.details?.[0]?.path).toBe('params.tableId');
     });
 
-    it('exposes no registration timestamps', async () => {
-      const response = await http().get('/api/v1/tables/table-001').expect(200);
+    it('exposes no registration timestamps and no owner', async () => {
+      const response = await http().get('/api/v1/tables/table-001').set(owner).expect(200);
 
+      expect(response.body).not.toHaveProperty('ownerAccountId');
       expect(response.body).not.toHaveProperty('createdAt');
       expect(response.body).not.toHaveProperty('updatedAt');
     });
@@ -196,15 +219,16 @@ describe('tables over HTTP', () => {
       expect(Date.parse(table.createdAt)).not.toBeNaN();
     });
 
-    it('makes the new table visible on the public endpoint straight away', async () => {
+    it('makes the new table visible to its owner straight away', async () => {
       const created = await http()
         .post(ADMIN)
         .set(admin)
-        .send({ displayName: 'Cafe', location: 'Terrace' })
+        .send({ displayName: 'Cafe', location: 'Terrace', ownerAccountId: ownerId })
         .expect(201);
 
       const response = await http()
         .get(`/api/v1/tables/${(created.body as { id: string }).id}`)
+        .set(owner)
         .expect(200);
 
       expect(getTableResponseSchema.parse(response.body)).toMatchObject({
@@ -232,7 +256,7 @@ describe('tables over HTTP', () => {
         .expect(201);
 
       expect((response.body as { id: string }).id).not.toBe('my-chosen-id');
-      await http().get('/api/v1/tables/my-chosen-id').expect(404);
+      await http().get('/api/v1/tables/my-chosen-id').set(admin).expect(404);
     });
 
     it('gives each table a different id', async () => {
@@ -291,7 +315,11 @@ describe('tables over HTTP', () => {
     it('returns the stored record for one table, including timestamps', async () => {
       const response = await http().get(`${ADMIN}/table-001`).set(admin).expect(200);
 
-      expect(adminTableSchema.parse(response.body)).toStrictEqual(fixtureTables()[0]);
+      expect(adminTableSchema.parse(response.body)).toStrictEqual({
+        ...fixtureTables()[0],
+        ownerAccountId: ownerId,
+        updatedAt: expect.any(String) as string,
+      });
     });
 
     it('answers TABLE_NOT_FOUND for an unknown table', async () => {
@@ -350,11 +378,11 @@ describe('tables over HTTP', () => {
       expect(Date.parse(after.updatedAt)).toBeGreaterThan(Date.parse(before.createdAt));
     });
 
-    it('switches a table off, and the public endpoint then shows enabled: false', async () => {
+    it('switches a table off, and the table then shows enabled: false', async () => {
       const id = await register();
 
       await http().patch(`${ADMIN}/${id}`).set(admin).send({ enabled: false }).expect(200);
-      const response = await http().get(`/api/v1/tables/${id}`).expect(200);
+      const response = await http().get(`/api/v1/tables/${id}`).set(admin).expect(200);
 
       expect((response.body as { enabled: boolean }).enabled).toBe(false);
     });
@@ -369,7 +397,7 @@ describe('tables over HTTP', () => {
         .expect(200);
 
       expect((response.body as { id: string }).id).toBe(id);
-      await http().get('/api/v1/tables/another-id').expect(404);
+      await http().get('/api/v1/tables/another-id').set(admin).expect(404);
     });
 
     it.each([
@@ -381,6 +409,51 @@ describe('tables over HTTP', () => {
       const response = await http().patch(`${ADMIN}/table-001`).set(admin).send(body).expect(400);
 
       expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
+    });
+
+    it('assigns an owner, a plan and the voice assistant, and removes the owner with null', async () => {
+      const id = await register();
+
+      const assigned = await http()
+        .patch(`${ADMIN}/${id}`)
+        .set(admin)
+        .send({ ownerAccountId: ownerId, plan: 'personalized', voiceAssistant: true })
+        .expect(200);
+      expect(adminTableSchema.parse(assigned.body)).toMatchObject({
+        ownerAccountId: ownerId,
+        plan: 'personalized',
+        voiceAssistant: true,
+      });
+      await http().get(`/api/v1/tables/${id}`).set(owner).expect(200);
+
+      await http().patch(`${ADMIN}/${id}`).set(admin).send({ ownerAccountId: null }).expect(200);
+      await http().get(`/api/v1/tables/${id}`).set(owner).expect(404);
+    });
+
+    it('refuses an owner that is not an existing, enabled customer with VALIDATION_FAILED', async () => {
+      const id = await register();
+      const adminId = (await signIn(app)).account.id;
+      const disabled = await signIn(app, 'customer');
+      await http()
+        .post(`/api/v1/admin/customers/${disabled.account.id}/disable`)
+        .set(admin)
+        .expect(200);
+
+      for (const ownerAccountId of ['no-such-account', adminId, disabled.account.id]) {
+        const patched = await http()
+          .patch(`${ADMIN}/${id}`)
+          .set(admin)
+          .send({ ownerAccountId })
+          .expect(400);
+        expect(errorOf(patched.body).code).toBe('VALIDATION_FAILED');
+
+        const created = await http()
+          .post(ADMIN)
+          .set(admin)
+          .send({ displayName: 'x', location: 'y', ownerAccountId })
+          .expect(400);
+        expect(errorOf(created.body).code).toBe('VALIDATION_FAILED');
+      }
     });
 
     it('answers TABLE_NOT_FOUND for an unknown table', async () => {

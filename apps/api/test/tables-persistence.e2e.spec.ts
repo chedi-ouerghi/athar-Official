@@ -10,6 +10,7 @@ import { StartupConfigurationError } from '../src/config/startup-configuration.e
 import { JsonFileTableRepository } from '../src/tables/json-file-table.repository.js';
 import { createTestConfig } from './create-test-config.js';
 import { bearer, signIn } from './create-test-app.js';
+import type { SessionResponse } from '@athar/contracts';
 
 /**
  * The application wired to the real JSON-file repository, as `main.ts` builds
@@ -48,15 +49,17 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
     }
   });
 
-  it('keeps a table created over HTTP across a restart', async () => {
+  it('keeps a table created over HTTP across a restart, and its owner keeps access', async () => {
     const first = await createConfiguredApp(config());
     let id: string;
+    let owner: SessionResponse;
 
     try {
+      owner = await signIn(first, 'customer');
       const created = await request(first.getHttpServer())
         .post('/api/v1/admin/tables')
         .set(bearer(await signIn(first)))
-        .send({ displayName: 'Survivor', location: 'Hall' })
+        .send({ displayName: 'Survivor', location: 'Hall', ownerAccountId: owner.account.id })
         .expect(201);
 
       id = (created.body as { id: string }).id;
@@ -67,8 +70,10 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
     const second = await createConfiguredApp(config());
 
     try {
+      // The accounts and sessions files persisted too, so the same session still works.
       const response = await request(second.getHttpServer())
         .get(`/api/v1/tables/${id}`)
+        .set(bearer(owner))
         .expect(200);
 
       expect(response.body).toMatchObject({ id, displayName: 'Survivor', enabled: true });
@@ -92,7 +97,7 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
       await request(first.getHttpServer())
         .patch(`/api/v1/admin/tables/${id}`)
         .set(admin)
-        .send({ enabled: false, displayName: 'After' })
+        .send({ enabled: false, displayName: 'After', plan: 'personalized', voiceAssistant: true })
         .expect(200);
     } finally {
       await first.close();
@@ -102,10 +107,16 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
 
     try {
       const response = await request(second.getHttpServer())
-        .get(`/api/v1/tables/${id}`)
+        .get(`/api/v1/admin/tables/${id}`)
+        .set(bearer(await signIn(second)))
         .expect(200);
 
-      expect(response.body).toMatchObject({ displayName: 'After', enabled: false });
+      expect(response.body).toMatchObject({
+        displayName: 'After',
+        enabled: false,
+        plan: 'personalized',
+        voiceAssistant: true,
+      });
     } finally {
       await second.close();
     }

@@ -2,11 +2,13 @@
  * Table contracts: the public view of a sand table.
  *
  * A table id is **public and non-secret**. It is printed in QR codes, so
- * knowing one is never proof of authorisation.
+ * knowing one is never proof of authorisation: the QR code identifies a table,
+ * and only a session of its owner (or an admin) may read it.
  */
 
 import { z } from 'zod';
 import { driverConnectionSchema, tableModeSchema } from './device.js';
+import { featureSchema, planSchema } from './entitlements.js';
 
 /**
  * Public table identifier: lowercase letters, digits and hyphens, 3 to 40
@@ -30,6 +32,12 @@ export const tableSchema = z.object({
   connection: driverConnectionSchema,
   /** Lets a second visitor open the running job. */
   activeJobId: z.string().nullable(),
+  /** What was ordered. */
+  plan: planSchema,
+  /** The voice-assistant add-on, independent of the plan. */
+  voiceAssistant: z.boolean(),
+  /** What the table can do, derived from `plan` and `voiceAssistant` by `featuresFor`. */
+  features: z.array(featureSchema),
 });
 export type Table = z.infer<typeof tableSchema>;
 

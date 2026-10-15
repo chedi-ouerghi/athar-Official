@@ -829,12 +829,13 @@ exceptions rather than deriving it from the status alone (gap 3.6).
 | `IDEMPOTENCY_CONFLICT` | 409  | `clientRequestId` reused with a different design |
 | `UNAUTHORIZED`         | 401  | No session, or an unknown access token           |
 
-`UNAUTHORIZED` is only returned under `/api/v1/admin` and `/api/v1/auth`
-([Admin authentication](#admin-authentication)); the public endpoints in this
-section never return it, because they have no authentication in this milestone.
-The session codes are listed in [api-conventions.md](api-conventions.md#sessions).
+Since Phase 3 every endpoint in this section needs a session, so each can also
+answer `UNAUTHORIZED` or `SESSION_EXPIRED`; see
+[Orders, entitlements and ownership](#orders-entitlements-and-ownership). The
+session codes are listed in [api-conventions.md](api-conventions.md#sessions).
 The existing codes keep their meaning. Check order for
-`POST /tables/:tableId/jobs`: validation, table exists, design exists,
+`POST /tables/:tableId/jobs`: session, validation, table exists **and is the
+caller's**, design exists,
 idempotency replay, table enabled, table online, table not busy.
 
 ### Resource shapes
@@ -883,7 +884,10 @@ type DrawingJob = {
 
 ### Endpoints
 
-All paths below are relative to the service root.
+All paths below are relative to the service root. All need a session except
+`/health` and `/ready`; a table (and its jobs) that is not the caller's answers
+as if it did not exist
+([Orders, entitlements and ownership](#orders-entitlements-and-ownership)).
 
 **`GET /api/v1/tables/:tableId`**
 
@@ -1013,15 +1017,25 @@ screen both call it, so they cannot disagree.
 
 ### What the QR code is, and is not
 
+**Decision (Phase 3, D1): the QR code identifies; the account authorises.**
+
 - It contains **only** a public table id inside a link: no token, signature,
   user data, job id or API address.
 - It is **never proof of authorisation.** Holding the id means "I know which
-  table this is", nothing more. Anyone who can read or photograph the printed
-  code, or guess an id, can open that table's screen.
+  table this is", nothing more. Since Phase 3 the API shows a table only to a
+  session of its owner (or an admin); anyone else, including someone who
+  photographed the code, gets `TABLE_NOT_FOUND`.
 - The app treats the id as untrusted input: it is validated locally, and the API
   answers `TABLE_NOT_FOUND` for anything unknown.
 
 ### What stops a stranger controlling a table remotely in this milestone
+
+> **Superseded in part by Phase 3.** Tables, designs and jobs now need a session,
+> and only a table's owner can see or command it
+> ([Orders, entitlements and ownership](#orders-entitlements-and-ownership)).
+> What remains open is proof of presence: an owner can still command their table
+> from anywhere. Pairing (Phase 4, D9) addresses that. The text below describes
+> the milestone before accounts.
 
 Honestly: **no access control exists on the public endpoints in this
 milestone**, and none is claimed. (The admin endpoints, which create and edit
@@ -1459,16 +1473,42 @@ as `Authorization: Bearer <accessToken>`. Admins are created with
   and never returned except at sign-in.
 - The mobile app never calls `/api/v1/admin`.
 
+### Orders, entitlements and ownership
+
+Phase 3 (decisions D1 to D4 in [plans/athar-v1-plan.md](plans/athar-v1-plan.md)).
+A table record carries the order:
+
+- `ownerAccountId`: the customer who ordered it, or `null`. Set by an admin on
+  `POST`/`PATCH /api/v1/admin/tables`; it must name an existing, non-disabled
+  customer (else `VALIDATION_FAILED`). An unowned table is visible to admins only.
+- `plan`: `basic` (catalogue designs and the rake) or `personalized` (adds the
+  drawing pen and LED ambiences). The map is the one constant `PLAN_FEATURES`
+  in `@athar/contracts`, so moving a feature between plans is a one-line change.
+- `voiceAssistant`: a per-table add-on, independent of the plan.
+
+All three have defaults (`null`, `basic`, `false`), so a tables file written
+before Phase 3 loads unchanged. The public `Table` adds `plan`,
+`voiceAssistant` and `features`, computed only by `featuresFor` (in
+`TablesService`); the owner id is never exposed on it.
+
+**Ownership rule.** `TableRegistry.getFor(tableId, account, use)` is the one
+check. The owner may read and command; an admin may read any table and job but
+not command; everyone else gets `TABLE_NOT_FOUND` (`JOB_NOT_FOUND` for a job),
+never `FORBIDDEN`, so ids cannot be enumerated. Designs are global and need only
+a session. Customers are created, listed, reset and disabled by admins under
+`/api/v1/admin/customers` ([api-conventions.md](api-conventions.md#sessions)).
+Disabling or resetting a customer revokes every session at once.
+
 ### The QR code, restated
 
 Unchanged from [section 6](#6-qr-code-and-deep-link-flow): the QR encodes only
 `https://<domain>/t/<tableId>`, holds no secret, and is **never proof of
 authorisation**. What provisioning changes is where the id comes from: a random
 server-generated value rather than a hand-typed one. That removes guessable ids
-(`table-1`) but does not make the code a credential. Anyone who photographs a
-printed code can open that table, and until access control exists (open
-decision 2) they can start, pause and stop jobs on it. In this milestone the
-table is simulated, so that is a nuisance; it must be solved before any hardware
+(`table-1`) but does not make the code a credential. Since Phase 3 the code
+identifies the table and the owner's session authorises: someone who
+photographs a printed code gets `TABLE_NOT_FOUND`. Proof that the owner is at
+the table (pairing) comes in Phase 4 and is required before any hardware
 driver.
 
 ### As built: the tables module

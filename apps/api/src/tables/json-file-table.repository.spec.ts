@@ -110,6 +110,61 @@ describe('JsonFileTableRepository', () => {
     });
   });
 
+  describe('a file written before orders existed', () => {
+    // Exactly what commit 0965207 wrote: no ownerAccountId, plan or voiceAssistant.
+    const OLD_FORMAT = `{
+  "version": 1,
+  "tables": [
+    {
+      "id": "k7q3x9m2d8r5t6w4",
+      "displayName": "Main hall",
+      "location": "Ground floor",
+      "enabled": true,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+`;
+
+    it('loads, each table unowned, basic and without the voice assistant', async () => {
+      await writeFile(file, OLD_FORMAT);
+      const repository = await open();
+
+      expect(await repository.list()).toStrictEqual([
+        {
+          id: 'k7q3x9m2d8r5t6w4',
+          displayName: 'Main hall',
+          location: 'Ground floor',
+          enabled: true,
+          ownerAccountId: null,
+          plan: 'basic',
+          voiceAssistant: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('writes the new fields back on the next change', async () => {
+      await writeFile(file, OLD_FORMAT);
+      const repository = await open();
+
+      await repository.update('k7q3x9m2d8r5t6w4', {
+        plan: 'personalized',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      });
+
+      expect(
+        (JSON.parse(await readFile(file, 'utf8')) as { tables: unknown[] }).tables[0],
+      ).toMatchObject({
+        ownerAccountId: null,
+        plan: 'personalized',
+        voiceAssistant: false,
+      });
+    });
+  });
+
   describe('a corrupted or invalid file', () => {
     it.each([
       ['is not JSON', '{ this is not json', /not valid JSON/],

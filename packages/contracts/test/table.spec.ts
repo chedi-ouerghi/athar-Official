@@ -36,6 +36,9 @@ describe('table', () => {
     mode: 'simulation',
     connection: 'online',
     activeJobId: null,
+    plan: 'personalized',
+    voiceAssistant: true,
+    features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences', 'voiceAssistant'],
   };
 
   it('accepts a valid table', () => {
@@ -46,5 +49,11 @@ describe('table', () => {
     expect(tableSchema.safeParse({ ...table, mode: undefined }).success).toBe(false);
     expect(tableSchema.safeParse({ ...table, mode: 'real' }).success).toBe(false);
     expect(tableSchema.safeParse({ ...table, connection: 'sleeping' }).success).toBe(false);
+  });
+
+  it('requires the plan, the voice add-on and known features', () => {
+    expect(tableSchema.safeParse({ ...table, plan: undefined }).success).toBe(false);
+    expect(tableSchema.safeParse({ ...table, voiceAssistant: undefined }).success).toBe(false);
+    expect(tableSchema.safeParse({ ...table, features: ['laser'] }).success).toBe(false);
   });
 });

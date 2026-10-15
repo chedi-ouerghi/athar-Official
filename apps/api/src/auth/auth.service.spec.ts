@@ -4,6 +4,7 @@ import { DomainException } from '../common/http/domain.exception.js';
 import { FakeClock } from '../device/fake-clock.js';
 import { AccountRepository } from './account.repository.js';
 import { AccountsService } from './accounts.service.js';
+import { CustomersService } from './customers.service.js';
 import {
   ACCESS_TOKEN_TTL_MS,
   AuthService,
@@ -70,6 +71,28 @@ describe('AuthService', () => {
 
       expect(session.account).toStrictEqual(admin);
       expect(await auth.authenticate(session.accessToken)).toMatchObject({ account: admin });
+    });
+
+    it('fails, leaving no live session, when access is reset during a slow password check', async () => {
+      const { service, auth, accounts, sessions, clock } = setup();
+      const customers = new CustomersService(accounts, service, auth, clock);
+      const { account, activationCode } = await service.createCustomer({
+        email: 'reem@athar.test',
+        displayName: 'Reem',
+      });
+      await auth.activate({ email: 'reem@athar.test', activationCode, password: PASSWORD }, 'ip');
+      let release!: (matches: boolean) => void;
+      vi.mocked(verifyPassword).mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => (release = resolve)),
+      );
+
+      const login = failure(auth.login({ email: 'reem@athar.test', password: PASSWORD }, 'ip'));
+      await vi.waitFor(() => expect(release).toBeDefined());
+      await customers.resetAccess(account.id);
+      release(true);
+
+      expect((await login).code).toBe('INVALID_CREDENTIALS');
+      expect(sessions.list().filter((session) => session.revokedAt === null)).toStrictEqual([]);
     });
 
     it('gives one identical answer for an unknown email, a wrong password, a disabled account and one not yet activated', async () => {

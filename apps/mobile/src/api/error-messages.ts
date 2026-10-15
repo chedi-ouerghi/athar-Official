@@ -42,6 +42,7 @@ const MESSAGE_BY_CODE: Readonly<Record<ApiErrorCode, ErrorMessageKey>> = {
   FORBIDDEN: 'error.generic',
   TOO_MANY_REQUESTS: 'error.generic',
   ACTIVATION_INVALID: 'error.generic',
+  ACCOUNT_EXISTS: 'error.generic',
   PAIRING_REQUIRED: 'error.generic',
   FEATURE_NOT_IN_PLAN: 'error.generic',
 };

@@ -78,9 +78,22 @@ export class AuthService {
       throw new DomainException('INVALID_CREDENTIALS', INVALID_CREDENTIALS_MESSAGE);
     }
 
+    const { id, response } = await this.startSession(account);
+
+    // An admin may have reset access or disabled the account during the slow
+    // verify. Those write the account first and revoke sessions after, so
+    // re-reading the committed account once our session is stored closes the
+    // gap: either we see the change here, or their revocation covers our session.
+    const current = await this.accounts.get(account.id);
+
+    if (current?.passwordHash !== account.passwordHash || current.disabled) {
+      await this.logout(id);
+      throw new DomainException('INVALID_CREDENTIALS', INVALID_CREDENTIALS_MESSAGE);
+    }
+
     this.throttle.clear(clearedOnSuccess(rules));
 
-    return (await this.startSession(account)).response;
+    return response;
   }
 
   /**

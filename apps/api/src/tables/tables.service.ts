@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Table } from '@athar/contracts';
+import { featuresFor, type AuthAccount, type Table } from '@athar/contracts';
 import { TABLE_DRIVER, type TableDriver } from '../device/table-driver.js';
 import { ACTIVE_JOB_LOOKUP, type ActiveJobLookup } from './active-job-lookup.js';
 import { TableRegistry } from './table-registry.service.js';
@@ -18,6 +18,18 @@ export class TablesService {
     @Inject(TABLE_DRIVER) private readonly driver: TableDriver,
     @Inject(ACTIVE_JOB_LOOKUP) private readonly jobs: ActiveJobLookup,
   ) {}
+
+  /**
+   * {@link getTable} for a signed-in account: only the owner, or an admin, sees
+   * the table; anyone else gets `TABLE_NOT_FOUND`.
+   *
+   * @throws DomainException `TABLE_NOT_FOUND`
+   */
+  async getTableFor(tableId: string, account: AuthAccount): Promise<Table> {
+    await this.registry.getFor(tableId, account);
+
+    return this.getTable(tableId);
+  }
 
   /**
    * A disabled table is returned like any other, with `enabled: false`, so the
@@ -41,6 +53,10 @@ export class TablesService {
       connection:
         activeJobId !== null && status.connection === 'online' ? 'busy' : status.connection,
       activeJobId,
+      plan: record.plan,
+      voiceAssistant: record.voiceAssistant,
+      // The one place the API derives a table's features.
+      features: featuresFor(record),
     };
   }
 }

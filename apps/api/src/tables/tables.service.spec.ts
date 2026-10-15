@@ -50,6 +50,20 @@ describe('TablesService', () => {
       mode: 'simulation',
       connection: 'online',
       activeJobId: null,
+      plan: 'basic',
+      voiceAssistant: false,
+      features: ['catalogue', 'rake'],
+    });
+  });
+
+  it('derives the features from the plan and the voice assistant', async () => {
+    const { registry, service } = setup();
+    await registry.update('table-001', { plan: 'personalized', voiceAssistant: true });
+
+    expect(await service.getTable('table-001')).toMatchObject({
+      plan: 'personalized',
+      voiceAssistant: true,
+      features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences', 'voiceAssistant'],
     });
   });
 
@@ -61,9 +75,12 @@ describe('TablesService', () => {
       'connection',
       'displayName',
       'enabled',
+      'features',
       'id',
       'location',
       'mode',
+      'plan',
+      'voiceAssistant',
     ]);
   });
 

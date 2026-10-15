@@ -10,7 +10,9 @@ import {
   type UpdateTableRequest,
 } from '@athar/contracts';
 import type { z } from 'zod';
+import { CustomersService } from '../auth/customers.service.js';
 import { SessionGuard, Roles } from '../auth/session.guard.js';
+import { DomainException } from '../common/http/domain.exception.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
 import { TableRegistry } from './table-registry.service.js';
 
@@ -25,14 +27,19 @@ import { TableRegistry } from './table-registry.service.js';
 @UseGuards(SessionGuard)
 @Roles('admin')
 export class AdminTablesController {
-  constructor(private readonly registry: TableRegistry) {}
+  constructor(
+    private readonly registry: TableRegistry,
+    private readonly customers: CustomersService,
+  ) {}
 
   /** Register a table. The server generates the id; the caller cannot choose it. */
   @Post()
-  create(
+  async create(
     @Body(new ZodValidationPipe(createTableRequestSchema))
     body: z.output<typeof createTableRequestSchema>,
   ): Promise<AdminTable> {
+    await this.checkOwner(body.ownerAccountId);
+
     return this.registry.create(body);
   }
 
@@ -49,10 +56,12 @@ export class AdminTablesController {
   }
 
   @Patch(':tableId')
-  update(
+  async update(
     @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
     @Body(new ZodValidationPipe(updateTableRequestSchema)) body: UpdateTableRequest,
   ): Promise<AdminTable> {
+    await this.checkOwner(body.ownerAccountId);
+
     return this.registry.update(params.tableId, body);
   }
 
@@ -62,5 +71,22 @@ export class AdminTablesController {
     @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
   ): Promise<TableQrResponse> {
     return { tableId: params.tableId, link: await this.registry.linkFor(params.tableId) };
+  }
+
+  /**
+   * A table's owner must be an existing, non-disabled customer. Anything else
+   * is the caller's mistake, so `VALIDATION_FAILED` on `body.ownerAccountId`.
+   */
+  private async checkOwner(ownerAccountId: string | null | undefined): Promise<void> {
+    if (
+      ownerAccountId !== null &&
+      ownerAccountId !== undefined &&
+      !(await this.customers.isAssignableOwner(ownerAccountId))
+    ) {
+      throw new DomainException(
+        'VALIDATION_FAILED',
+        'ownerAccountId must be the id of an existing, non-disabled customer account.',
+      );
+    }
   }
 }

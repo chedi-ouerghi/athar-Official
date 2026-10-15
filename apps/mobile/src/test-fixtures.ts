@@ -14,6 +14,9 @@ export function table(overrides: Partial<Table> = {}): Table {
     mode: 'simulation',
     connection: 'online',
     activeJobId: null,
+    plan: 'basic',
+    voiceAssistant: false,
+    features: ['catalogue', 'rake'],
     ...overrides,
   };
 }

@@ -121,7 +121,39 @@ Send `Authorization: Bearer <accessToken>` (header only, never URL or body) to
 `GET /api/v1/auth/me`, `POST /api/v1/auth/logout` (`204`) and everything under
 `/api/v1/admin` (role `admin`). Exchange the refresh token at
 `POST /api/v1/auth/refresh` (`{refreshToken}`) for a new pair; each refresh token
-works once. Other public endpoints need no session yet.
+works once.
+
+**Every table, design and job endpoint needs a session too.** Only `/health`,
+`/ready`, login, activate and refresh are open.
+
+**Ownership.** A table belongs to the customer the admin assigned it to
+(`ownerAccountId`). On `/api/v1/tables/:tableId`, `/tables/:tableId/jobs` and
+`/api/v1/jobs/:jobId`:
+
+- the owner may read and command (start, pause, resume, stop);
+- an admin may read any table, history and job, but does not command them;
+- anyone else gets `TABLE_NOT_FOUND` (or `JOB_NOT_FOUND` for a job), exactly as
+  for an id that does not exist, never `FORBIDDEN`, so ids cannot be probed.
+
+Designs are the same for every account: any session may read them. A table's
+`features` come from its `plan` and `voiceAssistant` through `featuresFor` in
+`@athar/contracts`; clients read them and never derive them.
+
+**Customers (admin only).** Under `/api/v1/admin/customers`:
+
+| Route                           | Answer                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| `POST /` `{email, displayName}` | `201 {account, activationCode}`; the code is shown here once, never again         |
+| `GET /`                         | `200 {customers}`, each with `status`: `pending-activation`, `active`, `disabled` |
+| `POST /:accountId/reset-access` | `200 {account, activationCode}`; clears the password, ends every session          |
+| `POST /:accountId/disable`      | `200` the customer, `disabled`; ends every session                                |
+
+An email already in use (by any account) is `ACCOUNT_EXISTS`. An unknown id, or
+the id of an admin, is `NOT_FOUND`. Reset does not re-enable a disabled
+customer. `POST` and `PATCH /api/v1/admin/tables` accept `ownerAccountId`
+(`null` removes the owner), `plan` (`basic` | `personalized`) and
+`voiceAssistant`; an owner that is not an existing, non-disabled customer is
+`VALIDATION_FAILED`.
 
 | Code                  | Status | Meaning                                                                                                            |
 | --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
@@ -129,6 +161,7 @@ works once. Other public endpoints need no session yet.
 | `SESSION_EXPIRED`     | 401    | Token expired or revoked, or a refresh failed: refresh, else sign in                                               |
 | `INVALID_CREDENTIALS` | 401    | Sign-in failed; same answer whether or not the email exists                                                        |
 | `ACTIVATION_INVALID`  | 400    | Wrong, used or expired activation code; same answer for an unknown email                                           |
+| `ACCOUNT_EXISTS`      | 409    | An admin tried to create a customer with an email already in use                                                   |
 | `FORBIDDEN`           | 403    | Signed in, but the role may not use the route                                                                      |
 | `TOO_MANY_REQUESTS`   | 429    | Too many attempts: 5 failures per email and IP in 15 min, 20 per email in an hour, or 30 attempts per IP in 15 min |
 | `PAIRING_REQUIRED`    | 409    | Reserved for table pairing (later phase)                                                                           |

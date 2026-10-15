@@ -12,6 +12,7 @@ import type { SimulatedTableDriver } from '../src/device/simulated-table-driver.
 import { TABLE_DRIVER } from '../src/device/table-driver.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
 import { InMemoryTableRepository } from '../src/tables/in-memory-table.repository.js';
+import { TableRegistry } from '../src/tables/table-registry.service.js';
 import { createTestConfig } from './create-test-config.js';
 import { fixtureTables } from './table-fixtures.js';
 
@@ -55,6 +56,24 @@ export async function signIn(
 
   const { activationCode } = await accounts.createCustomer({ email, displayName: 'Test customer' });
   return auth.activate({ email, activationCode, password: TEST_PASSWORD }, 'test');
+}
+
+/**
+ * Sign in a new customer and make it the owner of `tableIds`, as an admin
+ * assigning the order would. Returns the customer's session.
+ */
+export async function signInOwner(
+  app: NestExpressApplication,
+  ...tableIds: string[]
+): Promise<SessionResponse> {
+  const session = await signIn(app, 'customer');
+  const registry = app.get(TableRegistry);
+
+  for (const tableId of tableIds) {
+    await registry.update(tableId, { ownerAccountId: session.account.id });
+  }
+
+  return session;
 }
 
 /** The header that carries a session's access token. */

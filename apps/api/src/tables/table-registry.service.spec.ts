@@ -46,6 +46,9 @@ describe('TableRegistry', () => {
       expect(table).toStrictEqual({
         ...NEW_TABLE,
         id: table.id,
+        ownerAccountId: null,
+        plan: 'basic',
+        voiceAssistant: false,
         createdAt: START,
         updatedAt: START,
       });
@@ -123,6 +126,9 @@ describe('TableRegistry', () => {
         displayName: 'Main hall',
         location: 'Upstairs',
         enabled: true,
+        ownerAccountId: null,
+        plan: 'basic',
+        voiceAssistant: false,
         createdAt: START,
         updatedAt: '2026-01-01T00:01:00.000Z',
       });
@@ -142,6 +148,80 @@ describe('TableRegistry', () => {
       const failure = await failureOf(registry.update('nope-nope', { enabled: false }));
 
       expect((failure as DomainException).code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('assigns an order, and removes the owner only for an explicit null', async () => {
+      const { registry } = setup({ ids: ['table-a1'] });
+      await registry.create(NEW_TABLE);
+
+      expect(
+        await registry.update('table-a1', {
+          ownerAccountId: 'customer-1',
+          plan: 'personalized',
+          voiceAssistant: true,
+        }),
+      ).toMatchObject({ ownerAccountId: 'customer-1', plan: 'personalized', voiceAssistant: true });
+      // A patch that does not mention the owner keeps it.
+      expect((await registry.update('table-a1', { enabled: false })).ownerAccountId).toBe(
+        'customer-1',
+      );
+      expect((await registry.update('table-a1', { ownerAccountId: null })).ownerAccountId).toBe(
+        null,
+      );
+    });
+  });
+
+  describe('who may use a table', () => {
+    const owner = {
+      id: 'customer-1',
+      email: 'a@x.test',
+      displayName: 'A',
+      role: 'customer',
+    } as const;
+    const other = { ...owner, id: 'customer-2' };
+    const admin = { ...owner, id: 'admin-1', role: 'admin' } as const;
+
+    async function owned() {
+      const context = setup({ ids: ['table-a1'] });
+      await context.registry.create({ ...NEW_TABLE, ownerAccountId: owner.id });
+      return context.registry;
+    }
+
+    it('lets the owner read and command it', async () => {
+      const registry = await owned();
+
+      expect((await registry.getFor('table-a1', owner)).id).toBe('table-a1');
+      expect((await registry.getFor('table-a1', owner, 'command')).id).toBe('table-a1');
+    });
+
+    it('lets an admin read it, but not command it', async () => {
+      const registry = await owned();
+
+      expect((await registry.getFor('table-a1', admin)).id).toBe('table-a1');
+      expect(
+        ((await failureOf(registry.getFor('table-a1', admin, 'command'))) as DomainException).code,
+      ).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('tells anyone else the table does not exist, as for an unknown id', async () => {
+      const registry = await owned();
+
+      for (const failure of [
+        await failureOf(registry.getFor('table-a1', other)),
+        await failureOf(registry.getFor('nope-nope', owner)),
+      ]) {
+        expect((failure as DomainException).code).toBe('TABLE_NOT_FOUND');
+      }
+    });
+
+    it('gives an unowned table to nobody but admins', async () => {
+      const { registry } = setup({ ids: ['table-a1'] });
+      await registry.create(NEW_TABLE);
+
+      expect(((await failureOf(registry.getFor('table-a1', owner))) as DomainException).code).toBe(
+        'TABLE_NOT_FOUND',
+      );
+      expect((await registry.getFor('table-a1', admin)).id).toBe('table-a1');
     });
   });
 
