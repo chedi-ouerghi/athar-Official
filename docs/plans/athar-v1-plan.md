@@ -32,20 +32,20 @@ hardware exists.
 
 ## Decisions taken by this plan (change here, not in code)
 
-| #   | Decision | Default chosen |
-| --- | -------- | -------------- |
-| D1 | Who may use a table | Only accounts linked to it by the admin (the order's owner). The QR code identifies a table; it never authorises. |
-| D2 | Where the plan lives | On the table (the order). Entitlements come from `table.plan` plus `table.voiceAssistant`. |
-| D3 | Plan contents | `basic`: catalogue designs and rake. `personalized`: adds the drawing pen and LED ambiences. **Conflict:** the website lists the pen and LED as standard on every table. The plan map is one constant in contracts (`PLAN_FEATURES`), so moving a feature between plans is a one-line change. |
-| D4 | Voice assistant | Per-table admin flag, independent of plan (the site sells it as an add-on with the motion sensor). In simulation it is a flag and a UI capability only. |
-| D5 | Session model | Opaque random tokens, stored only as SHA-256 hashes. Access token 15 min; refresh token rotated on every use with reuse detection (a reused refresh token revokes the whole session). Customer session up to 30 days, admin session up to 12 h. Server-side revocation. No JWT. |
-| D6 | Passwords | `node:crypto` scrypt (salt 16 bytes, keylen 64, N=16384, r=8, p=1), compared with `timingSafeEqual`. Minimum 10 characters. |
-| D7 | Customer onboarding | The admin creates a customer, which returns a one-time activation code (10 chars, single use, 72 h, stored hashed). The customer enters email + code + new password in the app. A lost password works the same way: the admin resets access, which revokes all sessions and issues a new code. No email sending. |
-| D8 | Admin identity | Admin accounts with role `admin`, created by CLI (`pnpm --filter @athar/api admin:create`). `ADMIN_API_KEY` is removed, leaving one auth path. |
-| D9 | Pairing | `POST /api/v1/tables/:tableId/pairing` by the table's owner opens a 15-min sliding pairing for (account, table, session). In simulation it proves "this signed-in owner opened this table recently". The hardware phase will add proof of presence (a code shown on the table). |
-| D10 | Persistence | Same JSON-file store pattern as tables (atomic write + lock), extracted once into a shared helper. Shortcut: one API process only; move to Postgres before running more than one instance. |
-| D11 | Animations | React Native's built-in `Animated` API (native driver), with no new dependency. Every animation is skipped when the OS "reduce motion" setting is on. |
-| D12 | Sharing | React Native's built-in `Share.share` with text and the brand line. No image capture in v1. |
+| #   | Decision             | Default chosen                                                                                                                                                                                                                                                                                                   |
+| --- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Who may use a table  | Only accounts linked to it by the admin (the order's owner). The QR code identifies a table; it never authorises.                                                                                                                                                                                                |
+| D2  | Where the plan lives | On the table (the order). Entitlements come from `table.plan` plus `table.voiceAssistant`.                                                                                                                                                                                                                       |
+| D3  | Plan contents        | `basic`: catalogue designs and rake. `personalized`: adds the drawing pen and LED ambiences. **Conflict:** the website lists the pen and LED as standard on every table. The plan map is one constant in contracts (`PLAN_FEATURES`), so moving a feature between plans is a one-line change.                    |
+| D4  | Voice assistant      | Per-table admin flag, independent of plan (the site sells it as an add-on with the motion sensor). In simulation it is a flag and a UI capability only.                                                                                                                                                          |
+| D5  | Session model        | Opaque random tokens, stored only as SHA-256 hashes. Access token 15 min; refresh token rotated on every use with reuse detection (a reused refresh token revokes the whole session). Customer session up to 30 days, admin session up to 12 h. Server-side revocation. No JWT.                                  |
+| D6  | Passwords            | `node:crypto` scrypt (salt 16 bytes, keylen 64, N=16384, r=8, p=1), compared with `timingSafeEqual`. Minimum 10 characters.                                                                                                                                                                                      |
+| D7  | Customer onboarding  | The admin creates a customer, which returns a one-time activation code (10 chars, single use, 72 h, stored hashed). The customer enters email + code + new password in the app. A lost password works the same way: the admin resets access, which revokes all sessions and issues a new code. No email sending. |
+| D8  | Admin identity       | Admin accounts with role `admin`, created by CLI (`pnpm --filter @athar/api admin:create`). `ADMIN_API_KEY` is removed, leaving one auth path.                                                                                                                                                                   |
+| D9  | Pairing              | `POST /api/v1/tables/:tableId/pairing` by the table's owner opens a 15-min sliding pairing for (account, table, session). In simulation it proves "this signed-in owner opened this table recently". The hardware phase will add proof of presence (a code shown on the table).                                  |
+| D10 | Persistence          | Same JSON-file store pattern as tables (atomic write + lock), extracted once into a shared helper. Shortcut: one API process only; move to Postgres before running more than one instance.                                                                                                                       |
+| D11 | Animations           | React Native's built-in `Animated` API (native driver), with no new dependency. Every animation is skipped when the OS "reduce motion" setting is on.                                                                                                                                                            |
+| D12 | Sharing              | React Native's built-in `Share.share` with text and the brand line. No image capture in v1.                                                                                                                                                                                                                      |
 
 ## Phase 0: Documentation discovery (done)
 
@@ -363,6 +363,7 @@ paired with this phone and free. That is the owner's rule.
   6. the requested feature is in `featuresFor(table)` (`FEATURE_NOT_IN_PLAN`)
 
   Pause/resume/stop require ownership + a valid pairing.
+
 - `GET /tables/:tableId` adds `readiness: {paired: boolean, online: boolean, free: boolean, canStart: boolean}`,
   so the app can show why "Start" is disabled without guessing.
 - Keep idempotency (`clientRequestId`) working exactly as today.

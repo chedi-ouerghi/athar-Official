@@ -69,11 +69,12 @@ an `EXPO_PUBLIC_*` variable, or in a QR code. There is one shared key with no
 identity and no audit trail, and rotating it means restarting the API with a new
 value (see open decision 18 in [architecture.md](architecture.md)).
 
-**`PUBLIC_LINK_BASE_URL`.** An origin such as `https://app.athar.example`: no path,
-query or credentials; a trailing slash is ignored. Required in production, where
-it must be `https`. Unset in development, QR links use `athar://t/<tableId>`,
-which opens the app but cannot be scanned by a phone's camera app. The domain is
-baked into every printed code, so choose one that will outlive the products.
+**`PUBLIC_LINK_BASE_URL`.** An `https` origin such as `https://app.athar.example`:
+no port, path, query or credentials, because the app refuses any other link; a
+trailing slash is ignored. Required in production. Unset in development, QR
+links use `athar://t/<tableId>`, which opens the app but cannot be scanned by a
+phone's camera app. The domain is baked into every printed code, so choose one
+that will outlive the products.
 
 **`JOB_HISTORY_LIMIT`** (default `20`, at least `1`). Drawing jobs remembered per
 table, newest first. When a table has more, its oldest _finished_ jobs are

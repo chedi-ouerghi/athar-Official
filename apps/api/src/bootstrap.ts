@@ -159,7 +159,19 @@ export async function createApp(
 ): Promise<NestExpressApplication> {
   const app = await createConfiguredApp(config, overrides);
 
-  await app.listen(config.port, config.host);
+  try {
+    await app.listen(config.port, config.host);
+  } catch (error) {
+    // The caller never receives the app (the port is taken, say), so close it
+    // here: that releases the tables file lock. A failed close must not hide why
+    // listening failed.
+    await app.close().catch((closeError: unknown) => {
+      new Logger('Bootstrap').warn(
+        `Could not close the application after it failed to listen: ${closeError instanceof Error ? closeError.message : String(closeError)}`,
+      );
+    });
+    throw error;
+  }
 
   return app;
 }

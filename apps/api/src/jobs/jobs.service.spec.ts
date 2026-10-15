@@ -192,6 +192,20 @@ describe('JobsService', () => {
       expect(handed.estimatedDurationSeconds).toBe(collection.designs[1]!.estimatedDurationSeconds);
     });
 
+    it('looks the design up once when starting a job', async () => {
+      const lookups = vi.spyOn(DesignsService.prototype, 'get');
+
+      try {
+        const { service, request } = build(new ScriptedDriver());
+
+        await service.start(TABLE, request());
+
+        expect(lookups).toHaveBeenCalledTimes(1);
+      } finally {
+        lookups.mockRestore();
+      }
+    });
+
     it('returns the earlier job for a repeat, without asking the driver again', async () => {
       const driver = new ScriptedDriver();
       const { service, request } = build(driver);

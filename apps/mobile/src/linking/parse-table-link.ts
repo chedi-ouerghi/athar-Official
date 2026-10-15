@@ -46,7 +46,8 @@ const HTTPS_LINK = /^https:\/\/([^/?#@:]+)\/t\/([^/?#]+)\/?(?:[?#].*)?$/i;
 const SCHEME_LINK = /^athar:\/\/t\/([^/?#]+)\/?(?:[?#].*)?$/i;
 
 function validateId(candidate: string): ParsedTableLink {
-  const parsed = tableIdSchema.safeParse(candidate);
+  // Lowercased, as a typed code is (`parseTableCode`): ids are lowercase, so case carries nothing.
+  const parsed = tableIdSchema.safeParse(candidate.toLowerCase());
 
   return parsed.success ? { tableId: parsed.data } : { error: 'invalid-table-id' };
 }

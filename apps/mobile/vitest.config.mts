@@ -17,7 +17,6 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
       // Resolve `@athar/contracts` to its TypeScript source, so a change there
       // is picked up without rebuilding `dist`. (An alias, because Vitest does
       // not apply custom export conditions to a workspace package's entry.)

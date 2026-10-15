@@ -1,9 +1,11 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createConfiguredApp } from '../src/bootstrap.js';
+import { NestApplication } from '@nestjs/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createApp, createConfiguredApp } from '../src/bootstrap.js';
 import { StartupConfigurationError } from '../src/config/startup-configuration.error.js';
 import { JsonFileTableRepository } from '../src/tables/json-file-table.repository.js';
 import { createTestConfig } from './create-test-config.js';
@@ -113,6 +115,51 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
 
     await (await JsonFileTableRepository.open(file)).close();
     expect(await readdir(join(directory, 'data'))).toStrictEqual(['tables.json']);
+  });
+
+  /** Start the application on a port another server already holds. */
+  async function startOnTakenPort(): Promise<unknown> {
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const { port } = blocker.address() as AddressInfo;
+
+    try {
+      return await createApp(
+        createTestConfig({
+          ADMIN_API_KEY: TEST_ADMIN_KEY,
+          TABLES_DATA_FILE: file,
+          PORT: String(port),
+        }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    } finally {
+      await new Promise((resolve) => blocker.close(resolve));
+    }
+  }
+
+  it('releases the writer lock when the port is already in use', async () => {
+    expect(await startOnTakenPort()).toMatchObject({ code: 'EADDRINUSE' });
+
+    await (await JsonFileTableRepository.open(file)).close();
+  });
+
+  it('reports the port in use even if closing the application afterwards fails', async () => {
+    const realClose = NestApplication.prototype.close;
+    const close = vi
+      .spyOn(NestApplication.prototype, 'close')
+      .mockImplementationOnce(async function (this: NestApplication) {
+        await realClose.call(this);
+        throw new Error('close failed');
+      });
+
+    try {
+      expect(await startOnTakenPort()).toMatchObject({ code: 'EADDRINUSE' });
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      close.mockRestore();
+    }
   });
 
   it('refuses to start on a corrupted file, naming it, and leaves the file as it was', async () => {

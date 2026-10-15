@@ -117,14 +117,28 @@ describe('PUBLIC_LINK_BASE_URL', () => {
     ['https://app.athar.example/', 'https://app.athar.example'],
     ['https://app.athar.example///', 'https://app.athar.example'],
     ['  https://app.athar.example  ', 'https://app.athar.example'],
-    ['http://192.168.1.20:3000', 'http://192.168.1.20:3000'],
   ])('accepts %j and normalises it to %j', (raw, expected) => {
     expect(parseEnvironment({ PUBLIC_LINK_BASE_URL: raw }).PUBLIC_LINK_BASE_URL).toBe(expected);
   });
 
   it.each([
-    ['not a URL', 'app.athar.example', /absolute http\(s\) origin/],
-    ['a custom scheme', 'athar://t', /absolute http\(s\) origin/],
+    ['not a URL', 'app.athar.example', /absolute https origin/],
+    ['a custom scheme', 'athar://t', /absolute https origin/],
+    [
+      'http, even in development, because the app refuses http links',
+      'http://192.168.1.20',
+      /absolute https origin/,
+    ],
+    [
+      'a port, because the app refuses links with one',
+      'https://app.athar.example:8443',
+      /origin only/,
+    ],
+    ['an explicit default port', 'https://app.athar.example:443/', /origin only/],
+    ['a dangling query mark', 'https://app.athar.example?', /origin only/],
+    ['a dangling fragment mark', 'https://app.athar.example#', /origin only/],
+    ['a username alone', 'https://user@app.athar.example', /origin only/],
+    ['a password alone', 'https://:pw@app.athar.example', /origin only/],
     ['a path', 'https://app.athar.example/app', /origin only/],
     ['a query', 'https://app.athar.example?x=1', /origin only/],
     ['a fragment', 'https://app.athar.example/#top', /origin only/],
@@ -148,7 +162,9 @@ describe('PUBLIC_LINK_BASE_URL', () => {
     it('must use https', () => {
       expect(
         problemsWith({ ...production, PUBLIC_LINK_BASE_URL: 'http://app.athar.example' }),
-      ).toStrictEqual(['PUBLIC_LINK_BASE_URL: must use https when NODE_ENV=production']);
+      ).toStrictEqual([
+        'PUBLIC_LINK_BASE_URL: must be an absolute https origin such as https://app.athar.example',
+      ]);
     });
 
     it('accepts an https origin', () => {

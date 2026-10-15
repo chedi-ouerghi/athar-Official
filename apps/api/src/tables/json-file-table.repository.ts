@@ -19,10 +19,14 @@
  *   and disk in agreement.
  * - **One writing process.** A second process writing the file would silently
  *   discard the first one's changes, so a writer holds a lock file
- *   (`<file>.lock`, containing its pid) for as long as it is open. A lock left
- *   by a process that no longer exists is taken over. Read-only opens take no
- *   lock, and are safe at any time because the file is only ever replaced
- *   atomically.
+ *   (`<file>.lock`, containing `<pid>:<hostname>`) for as long as it is open. A
+ *   lock left on this host by a process that no longer exists is taken over, and
+ *   so is one naming this process's own pid that this process does not hold (a
+ *   container restarting as PID 1 finds the lock of its previous run). A lock
+ *   from another host (a shared volume) cannot be checked, so it is refused. A
+ *   lock holding only a pid, from an older build, counts as this host's.
+ *   Read-only opens take no lock, and are safe at any time because the file is
+ *   only ever replaced atomically.
  *
  * The file holds registration data only: no secrets, no personal data, no jobs.
  * It is a single-instance store; a database is an open decision.
@@ -31,7 +35,8 @@
 import { Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { hostname } from 'node:os';
+import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { adminTableSchema } from '@athar/contracts';
 import { StartupConfigurationError } from '../config/startup-configuration.error.js';
@@ -106,6 +111,19 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Lock files this process holds right now. A lock naming this process's pid
+ * that is not in here was left by an earlier process that had the same pid.
+ */
+const heldLocks = new Set<string>();
+
+/** The key of a lock file in {@link heldLocks}: one spelling per file, even on Windows. */
+function lockKey(lockFile: string): string {
+  const path = resolve(lockFile);
+
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
 function unusable(file: string, reason: string): StartupConfigurationError {
   return new StartupConfigurationError(
     `TABLES_DATA_FILE ${file} cannot be used: ${reason}\nThe file has not been modified.`,
@@ -173,6 +191,7 @@ export class JsonFileTableRepository implements TableRepository {
     } catch (error) {
       if (lockFile !== undefined) {
         await unlink(lockFile).catch(() => undefined);
+        heldLocks.delete(lockKey(lockFile));
       }
 
       throw error;
@@ -190,6 +209,7 @@ export class JsonFileTableRepository implements TableRepository {
 
     if (this.lockFile !== undefined) {
       await unlink(this.lockFile).catch(() => undefined);
+      heldLocks.delete(lockKey(this.lockFile));
     }
   }
 
@@ -247,6 +267,10 @@ export class JsonFileTableRepository implements TableRepository {
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
     if (this.readOnly) {
       return Promise.reject(new Error('This table repository was opened read-only.'));
+    }
+
+    if (this.closed) {
+      return Promise.reject(new Error('This table repository is closed.'));
     }
 
     const result = this.queue.then(task);
@@ -366,11 +390,12 @@ export class JsonFileTableRepository implements TableRepository {
         const handle = await open(lockFile, 'wx');
 
         try {
-          await handle.writeFile(String(process.pid), 'utf8');
+          await handle.writeFile(`${process.pid}:${hostname()}`, 'utf8');
         } finally {
           await handle.close();
         }
 
+        heldLocks.add(lockKey(lockFile));
         return;
       } catch (error) {
         if (errorCode(error) !== 'EEXIST') {
@@ -381,19 +406,33 @@ export class JsonFileTableRepository implements TableRepository {
         }
       }
 
-      const holder = Number.parseInt(await readFile(lockFile, 'utf8').catch(() => ''), 10);
-
-      if (Number.isInteger(holder) && holder > 0 && processIsAlive(holder)) {
-        throw unusable(
-          file,
-          `it is open for writing by process ${holder}. Only one process may write the tables file at a time: stop the API before running a command that changes tables, or use the admin endpoints instead.`,
-        );
-      }
+      // `<pid>:<hostname>`, or a bare pid from an older build, which is this host's.
+      const [pidText = '', host = hostname()] = (await readFile(lockFile, 'utf8').catch(() => ''))
+        .trim()
+        .split(':');
+      const holder = Number.parseInt(pidText, 10);
 
       if (!Number.isInteger(holder) || holder <= 0) {
         throw unusable(
           file,
           `its lock file ${lockFile} exists but does not name a process. If no API or command is running, delete the lock file.`,
+        );
+      }
+
+      if (host !== hostname()) {
+        throw unusable(
+          file,
+          `it is open for writing by process ${holder} on host ${host}, which cannot be checked from here. If no API or command is running there, delete the lock file ${lockFile}.`,
+        );
+      }
+
+      if (
+        // Our own pid in a lock we do not hold is left over from an earlier run (PID 1 in a container).
+        holder === process.pid ? heldLocks.has(lockKey(lockFile)) : processIsAlive(holder)
+      ) {
+        throw unusable(
+          file,
+          `it is open for writing by process ${holder}. Only one process may write the tables file at a time: stop the API before running a command that changes tables, or use the admin endpoints instead.`,
         );
       }
 

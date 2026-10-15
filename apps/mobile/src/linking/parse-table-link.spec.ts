@@ -63,8 +63,17 @@ describe('parseTableLink', () => {
     );
   });
 
+  it('accepts an id in upper case, as a typed code is, and returns it lowercased', () => {
+    const upper = ID.toUpperCase();
+
+    expect(parseTableLink(`athar://t/${upper}`, options)).toStrictEqual({ tableId: ID });
+    expect(parseTableLink(`https://app.athar.example/t/${upper}`, options)).toStrictEqual({
+      tableId: ID,
+    });
+  });
+
   it('refuses ids that the shared schema refuses', () => {
-    for (const bad of ['ab', 'UPPER-case', 'has_underscore', 'a'.repeat(41), '%41%42%43']) {
+    for (const bad of ['ab', 'has_underscore', 'a'.repeat(41), '%41%42%43']) {
       expect(parseTableLink(`athar://t/${bad}`, options).error).toBe('invalid-table-id');
       expect(parseTableLink(`https://app.athar.example/t/${bad}`, options).error).toBe(
         'invalid-table-id',

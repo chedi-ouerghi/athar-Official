@@ -51,7 +51,7 @@ describe('ShutdownCoordinator', () => {
   it('forces an exit when a termination signal is not followed by a clean shutdown', async () => {
     coordinator.onModuleInit();
 
-    process.emit('SIGTERM');
+    process.emit('SIGTERM', 'SIGTERM');
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     expect(process.exit).toHaveBeenCalledWith(1);
@@ -60,7 +60,7 @@ describe('ShutdownCoordinator', () => {
   it('does not force an exit when the shutdown completes in time', async () => {
     coordinator.onModuleInit();
 
-    process.emit('SIGINT');
+    process.emit('SIGINT', 'SIGINT');
     coordinator.onModuleDestroy();
     await new Promise((resolve) => setTimeout(resolve, 120));
 

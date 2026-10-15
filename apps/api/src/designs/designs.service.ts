@@ -33,7 +33,9 @@ export class DesignsService {
    * @throws DomainException `DESIGN_NOT_FOUND`
    */
   get(designId: string): DesignDetail {
-    return { ...toSummary(this.find(designId)), previewPath: this.find(designId).previewPath };
+    const design = this.find(designId);
+
+    return { ...toSummary(design), previewPath: design.previewPath };
   }
 
   /**

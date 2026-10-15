@@ -81,8 +81,10 @@ export const environmentSchema = z
 
     /**
      * Origin used to build the link inside a table's QR code:
-     * `<origin>/t/<tableId>`. Required in production and must be `https` there.
-     * Unset in development, where links use the `athar://` scheme.
+     * `<origin>/t/<tableId>`. Required in production. Always `https` with no port
+     * and no credentials, because the app accepts only such links: a QR code it
+     * would refuse is worse than none. Unset in development, where links use the
+     * `athar://` scheme.
      */
     PUBLIC_LINK_BASE_URL: optionalText.transform((value) => value?.trim().replace(/\/+$/, '')),
   })
@@ -132,28 +134,25 @@ export const environmentSchema = z
       url = undefined;
     }
 
-    if (url === undefined || (url.protocol !== 'https:' && url.protocol !== 'http:')) {
+    if (url === undefined || url.protocol !== 'https:') {
       context.addIssue({
         code: 'custom',
         path: ['PUBLIC_LINK_BASE_URL'],
-        message: 'must be an absolute http(s) origin such as https://app.athar.example',
+        message: 'must be an absolute https origin such as https://app.athar.example',
       });
     } else if (
       url.pathname !== '/' ||
-      url.search !== '' ||
-      url.hash !== '' ||
-      url.username !== ''
+      // A dangling `?` or `#` leaves `search` and `hash` empty, so look at the text.
+      /[?#]/.test(base) ||
+      url.username !== '' ||
+      url.password !== '' ||
+      // Any explicit port, even :443, which `URL` would hide.
+      /:\d*$/.test(base)
     ) {
       context.addIssue({
         code: 'custom',
         path: ['PUBLIC_LINK_BASE_URL'],
-        message: 'must be an origin only, with no path, query, fragment or credentials',
-      });
-    } else if (production && url.protocol !== 'https:') {
-      context.addIssue({
-        code: 'custom',
-        path: ['PUBLIC_LINK_BASE_URL'],
-        message: 'must use https when NODE_ENV=production',
+        message: 'must be an origin only, with no port, path, query, fragment or credentials',
       });
     }
   });

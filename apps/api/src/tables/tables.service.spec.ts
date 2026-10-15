@@ -1,8 +1,14 @@
 import { tableSchema } from '@athar/contracts';
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { DISABLED_TABLE, ENABLED_TABLE, fixtureTables } from '../../test/table-fixtures.js';
+import { designCollectionV1 } from '../designs/data/designs.v1.js';
+import { loadDesignCollection } from '../designs/design-collection.js';
+import { DesignsService } from '../designs/designs.service.js';
 import { FakeClock, ManualScheduler } from '../device/fake-clock.js';
 import { SimulatedTableDriver } from '../device/simulated-table-driver.js';
+import { InMemoryJobRepository } from '../jobs/in-memory-job.repository.js';
+import { JobsService } from '../jobs/jobs.service.js';
 import type { ActiveJobLookup } from './active-job-lookup.js';
 import { NoActiveJobs } from './active-job-lookup.js';
 import { InMemoryTableRepository } from './in-memory-table.repository.js';
@@ -26,7 +32,7 @@ function setup(jobs: ActiveJobLookup = new NoActiveJobs()) {
     generateTableId,
   );
 
-  return { driver, service: new TablesService(registry, driver, jobs) };
+  return { clock, driver, registry, service: new TablesService(registry, driver, jobs) };
 }
 
 describe('TablesService', () => {
@@ -136,6 +142,31 @@ describe('TablesService', () => {
   });
 
   describe('the seam to jobs', () => {
+    it('does not show a finished job as active when the read itself settles its completion', async () => {
+      const { clock, driver, registry } = setup();
+      const jobs = new JobsService(
+        new InMemoryJobRepository(5),
+        driver,
+        registry,
+        new DesignsService(loadDesignCollection(designCollectionV1)),
+        clock,
+      );
+      const service = new TablesService(registry, driver, jobs);
+      const { job } = await jobs.start('table-001', {
+        designId: 'star',
+        clientRequestId: randomUUID(),
+      });
+
+      // Long past the end of the drawing, with nothing having looked at the table since.
+      clock.advanceSeconds(24 * 60 * 60);
+
+      expect(await service.getTable('table-001')).toMatchObject({
+        connection: 'online',
+        activeJobId: null,
+      });
+      expect((await jobs.get(job.id)).state).toBe('completed');
+    });
+
     it('reports no active job by default', async () => {
       const { service } = setup();
 

@@ -27,14 +27,14 @@ wire-level schemas only, so neither side depends on the other's internals.
 
 ### `apps/api` (NestJS)
 
-| Directory       | Responsibility                                                     |
-| --------------- | ------------------------------------------------------------------ |
-| `src/config`    | Environment schema, validation, typed `AppConfig`, injection token |
-| `src/logging`   | `pino`/`nestjs-pino` setup, redaction, transport selection         |
-| `src/lifecycle` | Signal handling and the bounded-grace-period shutdown watchdog     |
-| `src/health`    | Liveness and readiness probes                                      |
-| `src/common`    | Request validation, exception filter, shared helpers               |
-| `src/bootstrap` | Application composition; shared by `main.ts` and the tests         |
+| Directory          | Responsibility                                                     |
+| ------------------ | ------------------------------------------------------------------ |
+| `src/config`       | Environment schema, validation, typed `AppConfig`, injection token |
+| `src/logging`      | `pino`/`nestjs-pino` setup, redaction, transport selection         |
+| `src/lifecycle`    | Signal handling and the bounded-grace-period shutdown watchdog     |
+| `src/health`       | Liveness and readiness probes                                      |
+| `src/common`       | Request validation, exception filter, shared helpers               |
+| `src/bootstrap.ts` | Application composition; shared by `main.ts` and the tests         |
 
 Rules that hold across the service:
 

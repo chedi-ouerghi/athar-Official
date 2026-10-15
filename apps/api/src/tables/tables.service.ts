@@ -28,7 +28,7 @@ export class TablesService {
   async getTable(tableId: string): Promise<Table> {
     const record = await this.registry.get(tableId);
     const status = await this.driver.getStatus(tableId);
-
+    // Asked after `getStatus`: the lookup waits for any event that read settled.
     const activeJobId = await this.jobs.activeJobIdFor(tableId);
 
     return {

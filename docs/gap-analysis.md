@@ -1,5 +1,7 @@
 # Gap analysis
 
+> **Superseded (2026-10-15).** The work list now lives in `docs/plans/athar-v1-plan.md`; §4 below no longer matches the code.
+
 Audit of the repository as of 2026-10-11 (branch `master`, no commits yet, all files untracked).
 No source code was changed. Every command result below was produced by running it on
 Windows 11, Node v20.19.2, pnpm 10.12.2. Claims that come from reading code rather than running

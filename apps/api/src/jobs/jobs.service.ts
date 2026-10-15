@@ -30,6 +30,7 @@ import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common
 import { randomUUID } from 'node:crypto';
 import {
   isActiveJobState,
+  type DesignDetail,
   type DrawingJob,
   type JobErrorCode,
   type JobTrigger,
@@ -103,9 +104,16 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
     return this.jobs.listRecent(tableId, limit);
   }
 
-  /** The seam `tables` reads: which job, if any, is running on a table. */
-  async activeJobIdFor(tableId: string): Promise<string | null> {
-    return (await this.jobs.findActive(tableId))?.id ?? null;
+  /**
+   * The seam `tables` reads: which job, if any, is running on a table.
+   *
+   * Read in `exclusive`, so a driver event queued just before (a completion the
+   * caller's `getStatus` settled, say) is applied first and a finished job is
+   * not reported as active. Never call it from inside `exclusive`: the queue is
+   * not reentrant, so that would wait for itself forever.
+   */
+  activeJobIdFor(tableId: string): Promise<string | null> {
+    return this.exclusive(async () => (await this.jobs.findActive(tableId))?.id ?? null);
   }
 
   // -------------------------------------------------------------------------
@@ -177,7 +185,7 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
       );
       this.listenTo(tableId);
 
-      return { job: await this.hand(job, request.designId), created: true };
+      return { job: await this.hand(job, design), created: true };
     });
   }
 
@@ -194,15 +202,12 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
   }
 
   /** Give a queued job to the driver, and settle what happens next. */
-  private async hand(job: DrawingJob, designId: string): Promise<DrawingJob> {
-    const trajectory = this.designs.getTrajectory(designId);
-    const { estimatedDurationSeconds } = this.designs.get(designId);
-
+  private async hand(job: DrawingJob, design: DesignDetail): Promise<DrawingJob> {
     try {
       await this.driver.startJob(job.tableId, {
         jobId: job.id,
-        trajectory,
-        estimatedDurationSeconds,
+        trajectory: this.designs.getTrajectory(design.id),
+        estimatedDurationSeconds: design.estimatedDurationSeconds,
       });
     } catch (error) {
       if (error instanceof DriverError) {

@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DISABLED_TABLE, ENABLED_TABLE } from '../../test/table-fixtures.js';
@@ -401,6 +401,44 @@ describe('JsonFileTableRepository', () => {
       await writeFile(`${file}.lock`, '999999999');
 
       await expect(open()).resolves.toBeInstanceOf(JsonFileTableRepository);
+    });
+
+    it.each([
+      ['this host', () => `${process.pid}:${hostname()}`],
+      ['an older build (pid only)', () => String(process.pid)],
+    ])(
+      'takes over a lock from %s naming its own pid that it does not hold, as after a container restart as PID 1',
+      async (_label, content) => {
+        await writeFile(`${file}.lock`, content());
+
+        await expect(open()).resolves.toBeInstanceOf(JsonFileTableRepository);
+        expect(await readFile(`${file}.lock`, 'utf8')).toBe(`${process.pid}:${hostname()}`);
+      },
+    );
+
+    it('refuses a lock naming its own pid from a different host, which it cannot check', async () => {
+      const lock = `${process.pid}:another-container`;
+      await writeFile(`${file}.lock`, lock);
+
+      const failure = await open().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(failure).toBeInstanceOf(StartupConfigurationError);
+      expect((failure as StartupConfigurationError).message).toContain('on host another-container');
+      expect(await readFile(`${file}.lock`, 'utf8')).toBe(lock);
+    });
+
+    it('rejects writes after close', async () => {
+      const repository = await open();
+      await repository.close();
+
+      await expect(repository.create(ENABLED_TABLE)).rejects.toThrow('closed');
+      await expect(
+        repository.update('table-001', { enabled: false, updatedAt: 'x' }),
+      ).rejects.toThrow('closed');
+      expect(await filesIn(directory)).toStrictEqual(['tables.json']);
     });
 
     it('refuses a lock file that names no process, and says how to clear it', async () => {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import { act, renderHook } from '@testing-library/react-native';
 import type { DrawingJob } from '@athar/contracts';
 import { appWrapper, stubClient } from '../../test-utils';
-import { apiError, job, networkError } from '../../test-fixtures';
+import { apiError, job, JOB_ID, networkError } from '../../test-fixtures';
 import { MAX_POLL_DELAY_MS } from './polling';
 import { useJob } from './useJob';
 
@@ -21,7 +21,7 @@ function setup(getJob: jest.Mock<GetJob>, options: { active?: boolean } = {}) {
   const client = stubClient({ getJob: getJob as never });
 
   return renderHook(
-    (props: { active: boolean }) => useJob('job-1', { intervalMs: INTERVAL, active: props.active }),
+    (props: { active: boolean }) => useJob(JOB_ID, { intervalMs: INTERVAL, active: props.active }),
     { wrapper: appWrapper(client), initialProps: { active: options.active ?? true } },
   );
 }
@@ -225,6 +225,90 @@ describe('useJob', () => {
     });
 
     expect(result.current.state).toMatchObject({ status: 'ready', job: { state: 'paused' } });
+  });
+
+  it('ignores a poll that was in flight when a command returned a newer job', async () => {
+    let answerPoll: (value: DrawingJob) => void = () => undefined;
+    const getJob = jest
+      .fn<GetJob>()
+      .mockResolvedValueOnce(job({ state: 'drawing', updatedAt: '2026-01-01T00:00:00.000Z' }))
+      .mockImplementationOnce(
+        () =>
+          new Promise<DrawingJob>((resolve) => {
+            answerPoll = resolve;
+          }),
+      )
+      .mockResolvedValue(job({ state: 'paused', updatedAt: '2026-01-01T00:00:02.000Z' }));
+    const { result } = setup(getJob);
+    await advance(0);
+    await advance(INTERVAL); // the second poll is now in flight
+
+    act(() => {
+      result.current.applyJob(job({ state: 'paused', updatedAt: '2026-01-01T00:00:02.000Z' }));
+    });
+    await act(async () => {
+      answerPoll(job({ state: 'drawing', updatedAt: '2026-01-01T00:00:01.000Z' }));
+      await Promise.resolve();
+    });
+
+    expect(result.current.state).toMatchObject({ status: 'ready', job: { state: 'paused' } });
+  });
+
+  it('fetches the new job, and stops showing the old one, when the job id changes', async () => {
+    const getJob = jest
+      .fn<GetJob>()
+      .mockImplementation((jobId) =>
+        Promise.resolve(
+          jobId === 'job-1'
+            ? job({ id: 'job-1', state: 'completed', progress: 1 })
+            : job({ id: jobId }),
+        ),
+      );
+    const { result, rerender } = renderHook(
+      (props: { jobId: string }) => useJob(props.jobId, { intervalMs: INTERVAL, active: true }),
+      {
+        wrapper: appWrapper(stubClient({ getJob: getJob as never })),
+        initialProps: { jobId: 'job-1' },
+      },
+    );
+    await advance(0);
+    expect(result.current.state).toMatchObject({ status: 'ready', job: { id: 'job-1' } });
+
+    rerender({ jobId: 'job-2' });
+    expect(result.current.state).toStrictEqual({ status: 'loading' });
+
+    await advance(0);
+    expect(getJob).toHaveBeenLastCalledWith('job-2', expect.anything());
+    expect(result.current.state).toMatchObject({
+      status: 'ready',
+      job: { id: 'job-2', state: 'drawing' },
+    });
+  });
+
+  it('ignores a late command response for the previous job after the job id changes', async () => {
+    const getJob = jest
+      .fn<GetJob>()
+      .mockImplementation((jobId) => Promise.resolve(job({ id: jobId, state: 'drawing' })));
+    const { result, rerender } = renderHook(
+      (props: { jobId: string }) => useJob(props.jobId, { intervalMs: INTERVAL, active: true }),
+      {
+        wrapper: appWrapper(stubClient({ getJob: getJob as never })),
+        initialProps: { jobId: 'job-1' },
+      },
+    );
+    await advance(0);
+    const applyForFirstJob = result.current.applyJob;
+
+    rerender({ jobId: 'job-2' });
+    await advance(0);
+    act(() => {
+      applyForFirstJob(job({ id: 'job-1', state: 'paused' }));
+    });
+
+    expect(result.current.state).toMatchObject({
+      status: 'ready',
+      job: { id: 'job-2', state: 'drawing' },
+    });
   });
 
   it('stops polling when a handed job is terminal', async () => {
