@@ -17,6 +17,7 @@ export function table(overrides: Partial<Table> = {}): Table {
     plan: 'basic',
     voiceAssistant: false,
     features: ['catalogue', 'rake'],
+    readiness: { paired: true, online: true, free: true, canStart: true },
     ...overrides,
   };
 }

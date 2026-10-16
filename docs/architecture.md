@@ -835,8 +835,9 @@ answer `UNAUTHORIZED` or `SESSION_EXPIRED`; see
 session codes are listed in [api-conventions.md](api-conventions.md#sessions).
 The existing codes keep their meaning. Check order for
 `POST /tables/:tableId/jobs`: session, validation, table exists **and is the
-caller's**, design exists,
-idempotency replay, table enabled, table online, table not busy.
+caller's**, design exists, idempotency replay, then the drawing conditions of
+[Pairing and the drawing conditions](#pairing-and-the-drawing-conditions):
+enabled, paired, online, free, feature in plan.
 
 ### Resource shapes
 
@@ -849,6 +850,10 @@ type Table = {
   mode: 'simulation' | 'hardware';
   connection: 'online' | 'offline' | 'busy' | 'error';
   activeJobId: string | null;
+  plan: 'basic' | 'personalized';
+  voiceAssistant: boolean;
+  features: Feature[];
+  readiness: { paired: boolean; online: boolean; free: boolean; canStart: boolean };
 };
 
 type LocalizedText = { en: string; ar: string };
@@ -916,7 +921,13 @@ as if it did not exist
 - Response: `201` `DrawingJob` for a new job; `200` `DrawingJob` for an
   idempotent replay.
 - Errors: `VALIDATION_FAILED`, `TABLE_NOT_FOUND`, `DESIGN_NOT_FOUND`,
-  `TABLE_DISABLED`, `TABLE_OFFLINE`, `TABLE_BUSY`, `IDEMPOTENCY_CONFLICT`.
+  `IDEMPOTENCY_CONFLICT`, `TABLE_DISABLED`, `PAIRING_REQUIRED`, `TABLE_OFFLINE`,
+  `TABLE_BUSY`, `FEATURE_NOT_IN_PLAN`.
+
+**`POST /api/v1/tables/:tableId/pairing`**, **`DELETE` the same**
+
+- Owner only. `200` `{ tableId, expiresAt }` (create or extend); `204` to unpair.
+- Errors: `VALIDATION_FAILED`, `TABLE_NOT_FOUND`.
 
 **`GET /api/v1/jobs/:jobId`**
 
@@ -928,7 +939,7 @@ as if it did not exist
 
 - Request: path `jobId`; empty body.
 - Response: `200` the updated `DrawingJob`, so the app needs no second round trip.
-- Errors: `VALIDATION_FAILED`, `JOB_NOT_FOUND`, `INVALID_TRANSITION`.
+- Errors: `VALIDATION_FAILED`, `JOB_NOT_FOUND`, `PAIRING_REQUIRED`, `INVALID_TRANSITION`.
 
 **`GET /api/v1/tables/:tableId/jobs`**
 
@@ -1033,9 +1044,11 @@ screen both call it, so they cannot disagree.
 > **Superseded in part by Phase 3.** Tables, designs and jobs now need a session,
 > and only a table's owner can see or command it
 > ([Orders, entitlements and ownership](#orders-entitlements-and-ownership)).
-> What remains open is proof of presence: an owner can still command their table
-> from anywhere. Pairing (Phase 4, D9) addresses that. The text below describes
-> the milestone before accounts.
+> Since Phase 4 a session must also be paired with the table
+> ([Pairing and the drawing conditions](#pairing-and-the-drawing-conditions)).
+> In simulation that proves only that the owner opened the table recently, not
+> that they stand at it: proof of presence comes with the hardware. The text
+> below describes the milestone before accounts.
 
 Honestly: **no access control exists on the public endpoints in this
 milestone**, and none is claimed. (The admin endpoints, which create and edit
@@ -1499,6 +1512,39 @@ a session. Customers are created, listed, reset and disabled by admins under
 `/api/v1/admin/customers` ([api-conventions.md](api-conventions.md#sessions)).
 Disabling or resetting a customer revokes every session at once.
 
+### Pairing and the drawing conditions
+
+Phase 4 (decision D9). A drawing starts only when the owner's table is enabled,
+paired with this session, online and free, and its plan includes the feature.
+
+- **Pairing.** `POST /api/v1/tables/:tableId/pairing` by the owner opens (or
+  extends) a pairing for (session, table); `DELETE` ends it. It slides: 15
+  minutes past the last pairing request, job start or job command, measured with
+  the injected `Clock`. `PairingStore` (`tables/pairing-store.ts`) keeps it in
+  memory keyed by session id, so a revoked or expired session can never use its
+  pairings again (its token no longer authenticates), and expired entries are
+  dropped on lookup and pruned on every write.
+  - `shortcut: lost on restart and per process; the app re-pairs automatically (Phase 6). Move it to shared storage before running more than one API instance.`
+- **The checks** live in `JobsService.start`, inside its `exclusive()` section
+  before the driver call, so check-then-start cannot race: owner
+  (`TABLE_NOT_FOUND`), design, idempotent replay, enabled (`TABLE_DISABLED`),
+  paired (`PAIRING_REQUIRED`), online (`TABLE_OFFLINE`), free (`TABLE_BUSY`),
+  feature in `featuresFor(table)` (`FEATURE_NOT_IN_PLAN`; a design start needs
+  `catalogue`, which every plan has, so today it never fails: the
+  `FEATURE_FOR_START` map is where Phase 5 adds the pen and ambiences). A replay
+  returns the original job without checking the conditions again. Pause and
+  resume need ownership (in the controller) and a pairing (in the service); stop,
+  the safety action, needs ownership only. A successful command extends an
+  existing pairing.
+- **Readiness.** `GET /api/v1/tables/:tableId` adds
+  `readiness: {paired, online, free, canStart}` for the calling session
+  (`canStart = enabled && paired && online && free`). An admin is never paired.
+- In simulation a pairing proves only "this signed-in owner opened this table
+  recently". The hardware phase adds proof of presence (a code shown on the
+  table) before any real driver is enabled.
+- The mobile app does not pair yet (Phase 6), so until then it cannot start or
+  command a job against this API; the HTTP tests pair explicitly.
+
 ### The QR code, restated
 
 Unchanged from [section 6](#6-qr-code-and-deep-link-flow): the QR encodes only
@@ -1507,9 +1553,9 @@ authorisation**. What provisioning changes is where the id comes from: a random
 server-generated value rather than a hand-typed one. That removes guessable ids
 (`table-1`) but does not make the code a credential. Since Phase 3 the code
 identifies the table and the owner's session authorises: someone who
-photographs a printed code gets `TABLE_NOT_FOUND`. Proof that the owner is at
-the table (pairing) comes in Phase 4 and is required before any hardware
-driver.
+photographs a printed code gets `TABLE_NOT_FOUND`. Since Phase 4 the session
+must also be paired with the table; proof that the owner is physically at the
+table comes with the hardware and is required before any hardware driver.
 
 ### As built: the tables module
 
@@ -1524,6 +1570,7 @@ imported by `AppModule.forRoot(config, tables)`, which receives an
 | `InMemoryTableRepository` | Tests only; one shared contract suite runs against both implementations                                                                                                            |
 | `TableRegistry`           | The admin operations (create, list, get, update, link). Used by the admin controller **and** the `table:create` command                                                            |
 | `TablesService`           | The public view of a table: registration data plus `mode`/`connection` read from the driver on every request                                                                       |
+| `PairingStore`            | In-memory pairings (session, table) with a 15-minute sliding expiry; read by `TablesService` (readiness) and `JobsService` (the drawing conditions)                                |
 | `SessionGuard`            | From `auth/`: with `@Roles('admin')`, applied to the whole admin controller                                                                                                        |
 | `ACTIVE_JOB_LOOKUP`       | **The seam to jobs.** `tables` knows only this one-method interface; `NoActiveJobs` answers `null` until the jobs module provides the real one, so `activeJobId` is `null` for now |
 

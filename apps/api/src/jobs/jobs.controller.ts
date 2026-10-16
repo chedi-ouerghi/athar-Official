@@ -61,7 +61,7 @@ export class JobsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<DrawingJob> {
     await this.visible(params.jobId, request.auth.account, 'command');
-    return this.jobs.pause(params.jobId);
+    return this.jobs.pause(params.jobId, request.auth);
   }
 
   @Post(':jobId/resume')
@@ -72,7 +72,7 @@ export class JobsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<DrawingJob> {
     await this.visible(params.jobId, request.auth.account, 'command');
-    return this.jobs.resume(params.jobId);
+    return this.jobs.resume(params.jobId, request.auth);
   }
 
   @Post(':jobId/stop')
@@ -83,7 +83,7 @@ export class JobsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<DrawingJob> {
     await this.visible(params.jobId, request.auth.account, 'command');
-    return this.jobs.stop(params.jobId);
+    return this.jobs.stop(params.jobId, request.auth);
   }
 
   /** @throws DomainException `JOB_NOT_FOUND` for a missing job, or one on a table `account` may not use. */

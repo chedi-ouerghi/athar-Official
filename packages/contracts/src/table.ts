@@ -19,6 +19,22 @@ export const TABLE_ID_PATTERN = /^[a-z0-9-]{3,40}$/;
 export const tableIdSchema = z.string().regex(TABLE_ID_PATTERN, 'Invalid table id');
 export type TableId = z.infer<typeof tableIdSchema>;
 
+/**
+ * Whether the calling session may start a drawing now, and if not, why. Computed
+ * per session: another session of the same owner, or an admin, is not paired.
+ */
+export const tableReadinessSchema = z.object({
+  /** This session holds a live pairing with the table (`POST .../pairing`). */
+  paired: z.boolean(),
+  /** The driver is reachable (not `offline` or `error`). */
+  online: z.boolean(),
+  /** No job is active on the table. */
+  free: z.boolean(),
+  /** `enabled && paired && online && free`. */
+  canStart: z.boolean(),
+});
+export type TableReadiness = z.infer<typeof tableReadinessSchema>;
+
 export const tableSchema = z.object({
   id: tableIdSchema,
   displayName: z.string(),
@@ -38,6 +54,8 @@ export const tableSchema = z.object({
   voiceAssistant: z.boolean(),
   /** What the table can do, derived from `plan` and `voiceAssistant` by `featuresFor`. */
   features: z.array(featureSchema),
+  /** The drawing conditions, for the calling session. */
+  readiness: tableReadinessSchema,
 });
 export type Table = z.infer<typeof tableSchema>;
 
@@ -48,3 +66,14 @@ export type TableParams = z.infer<typeof tableParamsSchema>;
 /** Payload of `GET /api/v1/tables/:tableId`. */
 export const getTableResponseSchema = tableSchema;
 export type GetTableResponse = Table;
+
+/**
+ * Payload of `POST /api/v1/tables/:tableId/pairing`: the session's pairing with
+ * the table (decision D9). It slides: every pairing request and every successful
+ * job start or command pushes `expiresAt` 15 minutes past that moment.
+ */
+export const pairingSchema = z.object({
+  tableId: tableIdSchema,
+  expiresAt: z.string(),
+});
+export type Pairing = z.infer<typeof pairingSchema>;

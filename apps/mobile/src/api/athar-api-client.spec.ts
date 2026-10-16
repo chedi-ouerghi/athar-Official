@@ -75,6 +75,7 @@ const TABLE = {
   plan: 'basic',
   voiceAssistant: false,
   features: ['catalogue', 'rake'],
+  readiness: { paired: true, online: true, free: true, canStart: true },
 };
 
 const DESIGN_SUMMARY = {

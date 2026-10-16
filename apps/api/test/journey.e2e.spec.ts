@@ -34,8 +34,8 @@ afterEach(async () => {
 /**
  * Everything a test does over HTTP, with the answers parsed against the shared
  * contracts. Every request is the signed-in customer's, who owns every table
- * `createTable` registers (and any table `claim`ed); the admin calls set their
- * own header over it.
+ * `createTable` registers (and any table `claim`ed) and has paired with it, as
+ * the app does on opening a table; the admin calls set their own header over it.
  */
 async function client(timed: TimedApp) {
   const customer = await signIn(timed.app, 'customer');
@@ -63,8 +63,10 @@ async function client(timed: TimedApp) {
           ...overrides,
         })
         .expect(201);
+      const tableId = adminTableSchema.parse(response.body).id;
+      await this.pair(tableId);
 
-      return adminTableSchema.parse(response.body).id;
+      return tableId;
     },
 
     /** Make the customer the owner of an existing (fixture) table. */
@@ -74,6 +76,12 @@ async function client(timed: TimedApp) {
         .set(await admin())
         .send({ ownerAccountId: customer.account.id })
         .expect(200);
+      await this.pair(tableId);
+    },
+
+    /** Pair this session with a table it owns (the drawing condition of D9). */
+    async pair(tableId: string): Promise<void> {
+      await http().post(`/api/v1/tables/${tableId}/pairing`).expect(200);
     },
 
     start: (tableId: string, designId = 'star', clientRequestId: string = randomUUID()) =>
@@ -109,6 +117,7 @@ describe('the full journey', () => {
       plan: 'basic',
       voiceAssistant: false,
       features: ['catalogue', 'rake'],
+      readiness: { paired: true, online: true, free: true, canStart: true },
     });
 
     // The app lists the four designs and the visitor picks one.

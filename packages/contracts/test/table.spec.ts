@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TABLE_ID_PATTERN, tableIdSchema, tableSchema } from '../src/index.js';
+import { TABLE_ID_PATTERN, pairingSchema, tableIdSchema, tableSchema } from '../src/index.js';
 
 describe('table id', () => {
   it.each(['abc', 'table-001', 'a1b2c3', '7k3q9x2m', 'a'.repeat(40)])('accepts %s', (id) => {
@@ -39,6 +39,7 @@ describe('table', () => {
     plan: 'personalized',
     voiceAssistant: true,
     features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences', 'voiceAssistant'],
+    readiness: { paired: true, online: true, free: true, canStart: true },
   };
 
   it('accepts a valid table', () => {
@@ -55,5 +56,24 @@ describe('table', () => {
     expect(tableSchema.safeParse({ ...table, plan: undefined }).success).toBe(false);
     expect(tableSchema.safeParse({ ...table, voiceAssistant: undefined }).success).toBe(false);
     expect(tableSchema.safeParse({ ...table, features: ['laser'] }).success).toBe(false);
+  });
+
+  it('requires the readiness', () => {
+    expect(tableSchema.safeParse({ ...table, readiness: undefined }).success).toBe(false);
+    expect(
+      tableSchema.safeParse({ ...table, readiness: { paired: true, online: true, free: true } })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe('pairing', () => {
+  it('requires a valid table id and an expiry', () => {
+    expect(
+      pairingSchema.safeParse({ tableId: 'table-001', expiresAt: '2026-01-01T00:15:00.000Z' })
+        .success,
+    ).toBe(true);
+    expect(pairingSchema.safeParse({ tableId: 'T', expiresAt: '2026' }).success).toBe(false);
+    expect(pairingSchema.safeParse({ tableId: 'table-001' }).success).toBe(false);
   });
 });

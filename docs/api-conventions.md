@@ -135,6 +135,35 @@ works once.
 - anyone else gets `TABLE_NOT_FOUND` (or `JOB_NOT_FOUND` for a job), exactly as
   for an id that does not exist, never `FORBIDDEN`, so ids cannot be probed.
 
+**Pairing and the drawing conditions** (decision D9). Before starting or commanding
+a job, the owner's session pairs with the table:
+
+| Route                                    | Answer                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| `POST /api/v1/tables/:tableId/pairing`   | `200 {tableId, expiresAt}`, creating or extending this session's pairing |
+| `DELETE /api/v1/tables/:tableId/pairing` | `204`, also when there was no pairing                                    |
+
+Only the owner may pair (anyone else, admins included: `TABLE_NOT_FOUND`). A
+pairing belongs to one session: another sign-in of the same owner is not paired,
+and a session that is revoked or expires takes its pairings with it. It lasts 15
+minutes from the last pairing request, job start or job command, whichever came
+last. Pairings live in memory and are lost when the API restarts; the app re-pairs.
+
+`POST /api/v1/tables/:tableId/jobs` checks, in this order, and answers the first
+failure: session (`UNAUTHORIZED`), validation, the caller owns the table
+(`TABLE_NOT_FOUND`), the design exists (`DESIGN_NOT_FOUND`), a repeated
+`clientRequestId` (the original job, `200`, or `IDEMPOTENCY_CONFLICT`), then the
+drawing conditions: enabled (`TABLE_DISABLED`), paired (`PAIRING_REQUIRED`),
+online (`TABLE_OFFLINE`), free (`TABLE_BUSY`), and the plan includes the feature
+(`FEATURE_NOT_IN_PLAN`). A repeat returns the original job without checking the
+conditions again, so a retry after a lost response cannot fail on a lapsed
+pairing. Pause and resume need ownership (`JOB_NOT_FOUND`) and a pairing
+(`PAIRING_REQUIRED`); stop, the safety action, needs ownership only.
+
+`GET /api/v1/tables/:tableId` carries `readiness: {paired, online, free, canStart}`
+for the calling session, with `canStart = enabled && paired && online && free`,
+so the app can say why it cannot start. An admin is never paired.
+
 Designs are the same for every account: any session may read them. A table's
 `features` come from its `plan` and `voiceAssistant` through `featuresFor` in
 `@athar/contracts`; clients read them and never derive them.
@@ -164,8 +193,8 @@ customer. `POST` and `PATCH /api/v1/admin/tables` accept `ownerAccountId`
 | `ACCOUNT_EXISTS`      | 409    | An admin tried to create a customer with an email already in use                                                   |
 | `FORBIDDEN`           | 403    | Signed in, but the role may not use the route                                                                      |
 | `TOO_MANY_REQUESTS`   | 429    | Too many attempts: 5 failures per email and IP in 15 min, 20 per email in an hour, or 30 attempts per IP in 15 min |
-| `PAIRING_REQUIRED`    | 409    | Reserved for table pairing (later phase)                                                                           |
-| `FEATURE_NOT_IN_PLAN` | 403    | Reserved for plan entitlements (later phase)                                                                       |
+| `PAIRING_REQUIRED`    | 409    | This session is not paired with the table, or its pairing expired: pair again                                      |
+| `FEATURE_NOT_IN_PLAN` | 403    | The table's plan does not include what the request needs                                                           |
 
 Reusing a refresh token revokes the whole session, including when a client retries
 a refresh whose answer it never received. The app treats `SESSION_EXPIRED` from

@@ -45,8 +45,8 @@ export class TableJobsController {
     @Req() request: AuthenticatedRequest,
     @Res({ passthrough: true }) response: HttpResponse,
   ): Promise<DrawingJob> {
-    await this.tables.getFor(params.tableId, request.auth.account, 'command');
-    const { job, created } = await this.jobs.start(params.tableId, body);
+    // Ownership and the drawing conditions are checked by the service, under its lock.
+    const { job, created } = await this.jobs.start(params.tableId, body, request.auth);
 
     response.status(created ? 201 : 200);
 

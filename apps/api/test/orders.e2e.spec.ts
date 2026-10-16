@@ -108,6 +108,7 @@ describe('orders and entitlements', () => {
 
     await notFound(http().get(`/api/v1/tables/${tableId}`).set(other), 'TABLE_NOT_FOUND');
     await notFound(http().get(`/api/v1/tables/${tableId}/jobs`).set(other), 'TABLE_NOT_FOUND');
+    await notFound(http().post(`/api/v1/tables/${tableId}/pairing`).set(other), 'TABLE_NOT_FOUND');
     await notFound(
       http()
         .post(`/api/v1/tables/${tableId}/jobs`)
@@ -116,7 +117,8 @@ describe('orders and entitlements', () => {
       'TABLE_NOT_FOUND',
     );
 
-    // The owner starts a job; the other customer cannot see or command it.
+    // The owner pairs and starts a job; the other customer cannot see or command it.
+    await http().post(`/api/v1/tables/${tableId}/pairing`).set(bearer(reem.session)).expect(200);
     const job = drawingJobSchema.parse(
       (
         await http()
@@ -136,6 +138,7 @@ describe('orders and entitlements', () => {
     await http().get(`/api/v1/tables/${tableId}/jobs`).set(admin).expect(200);
     await http().get(`/api/v1/jobs/${job.id}`).set(admin).expect(200);
     await notFound(http().post(`/api/v1/jobs/${job.id}/stop`).set(admin), 'JOB_NOT_FOUND');
+    await notFound(http().post(`/api/v1/tables/${tableId}/pairing`).set(admin), 'TABLE_NOT_FOUND');
 
     // The owner still can.
     await http().post(`/api/v1/jobs/${job.id}/stop`).set(bearer(reem.session)).expect(200);
@@ -154,6 +157,8 @@ describe('orders and entitlements', () => {
       expect(errorOf((await http().get(path).expect(401)).body).code).toBe('UNAUTHORIZED');
     }
     await http().post('/api/v1/tables/table-001/jobs').send({}).expect(401);
+    await http().post('/api/v1/tables/table-001/pairing').expect(401);
+    await http().delete('/api/v1/tables/table-001/pairing').expect(401);
     await http().post(`/api/v1/jobs/${randomUUID()}/stop`).expect(401);
     await http().get('/health').expect(200);
     await http().get('/ready').expect(200);

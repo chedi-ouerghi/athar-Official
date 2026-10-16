@@ -12,6 +12,7 @@ import { JobsService } from '../jobs/jobs.service.js';
 import type { ActiveJobLookup } from './active-job-lookup.js';
 import { NoActiveJobs } from './active-job-lookup.js';
 import { InMemoryTableRepository } from './in-memory-table.repository.js';
+import { PairingStore } from './pairing-store.js';
 import { generateTableId } from './table-id.js';
 import { TableRegistry } from './table-registry.service.js';
 import { TablesService } from './tables.service.js';
@@ -31,8 +32,15 @@ function setup(jobs: ActiveJobLookup = new NoActiveJobs()) {
     clock,
     generateTableId,
   );
+  const pairings = new PairingStore(clock);
 
-  return { clock, driver, registry, service: new TablesService(registry, driver, jobs) };
+  return {
+    clock,
+    driver,
+    registry,
+    pairings,
+    service: new TablesService(registry, driver, jobs, pairings),
+  };
 }
 
 describe('TablesService', () => {
@@ -53,6 +61,42 @@ describe('TablesService', () => {
       plan: 'basic',
       voiceAssistant: false,
       features: ['catalogue', 'rake'],
+      readiness: { paired: false, online: true, free: true, canStart: false },
+    });
+  });
+
+  describe('readiness, for the calling session', () => {
+    it('can start only when enabled, paired, online and free', async () => {
+      const { service, pairings, driver } = setup();
+      pairings.pair('session-1', 'table-001');
+      pairings.pair('session-1', 'table-off');
+
+      expect((await service.getTable('table-001', 'session-1')).readiness).toStrictEqual({
+        paired: true,
+        online: true,
+        free: true,
+        canStart: true,
+      });
+      expect((await service.getTable('table-001', 'session-2')).readiness.paired).toBe(false);
+      expect((await service.getTable('table-off', 'session-1')).readiness.canStart).toBe(false);
+
+      driver.simulateConnection('table-001', 'error');
+      expect((await service.getTable('table-001', 'session-1')).readiness).toMatchObject({
+        online: false,
+        canStart: false,
+      });
+    });
+
+    it('is not free while a job is active', async () => {
+      const { service, pairings } = setup({ activeJobIdFor: () => Promise.resolve('job-42') });
+      pairings.pair('session-1', 'table-001');
+
+      expect((await service.getTable('table-001', 'session-1')).readiness).toStrictEqual({
+        paired: true,
+        online: true,
+        free: false,
+        canStart: false,
+      });
     });
   });
 
@@ -80,6 +124,7 @@ describe('TablesService', () => {
       'location',
       'mode',
       'plan',
+      'readiness',
       'voiceAssistant',
     ]);
   });
@@ -160,19 +205,27 @@ describe('TablesService', () => {
 
   describe('the seam to jobs', () => {
     it('does not show a finished job as active when the read itself settles its completion', async () => {
-      const { clock, driver, registry } = setup();
+      const { clock, driver, registry, pairings } = setup();
       const jobs = new JobsService(
         new InMemoryJobRepository(5),
         driver,
         registry,
         new DesignsService(loadDesignCollection(designCollectionV1)),
         clock,
+        pairings,
       );
-      const service = new TablesService(registry, driver, jobs);
-      const { job } = await jobs.start('table-001', {
-        designId: 'star',
-        clientRequestId: randomUUID(),
-      });
+      const service = new TablesService(registry, driver, jobs, pairings);
+      const owner = {
+        account: { id: 'owner-1', email: 'o@athar.test', displayName: 'O', role: 'customer' },
+        sessionId: 'session-1',
+      } as const;
+      await registry.update('table-001', { ownerAccountId: owner.account.id });
+      pairings.pair(owner.sessionId, 'table-001');
+      const { job } = await jobs.start(
+        'table-001',
+        { designId: 'star', clientRequestId: randomUUID() },
+        owner,
+      );
 
       // Long past the end of the drawing, with nothing having looked at the table since.
       clock.advanceSeconds(24 * 60 * 60);

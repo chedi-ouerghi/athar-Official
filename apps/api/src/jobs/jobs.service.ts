@@ -29,13 +29,16 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  featuresFor,
   isActiveJobState,
   type DesignDetail,
   type DrawingJob,
+  type Feature,
   type JobErrorCode,
   type JobTrigger,
   type StartJobRequest,
 } from '@athar/contracts';
+import type { Authenticated } from '../auth/auth.service.js';
 import { DomainException } from '../common/http/domain.exception.js';
 import { CLOCK, type Clock } from '../device/clock.js';
 import {
@@ -47,6 +50,7 @@ import {
   type Unsubscribe,
 } from '../device/table-driver.js';
 import { DesignsService } from '../designs/designs.service.js';
+import { PairingStore } from '../tables/pairing-store.js';
 import { TableRegistry } from '../tables/table-registry.service.js';
 import type { ActiveJobLookup } from '../tables/active-job-lookup.js';
 import {
@@ -57,6 +61,12 @@ import {
   type JobCommand,
 } from './job-state-machine.js';
 import { JOB_REPOSITORY, type JobRepository } from './job-repository.js';
+
+/**
+ * The feature each kind of start needs from the table's plan. Today every start
+ * draws a catalogue design; a new kind of start adds its line here.
+ */
+const FEATURE_FOR_START = { design: 'catalogue' } as const satisfies Record<string, Feature>;
 
 export interface StartedJob {
   readonly job: DrawingJob;
@@ -76,6 +86,7 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
     private readonly tables: TableRegistry,
     private readonly designs: DesignsService,
     @Inject(CLOCK) private readonly clock: Clock,
+    private readonly pairings: PairingStore,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -123,20 +134,27 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
   /**
    * Start a drawing, or return the one an earlier identical request started.
    *
-   * Checked in the documented order: the table exists, the design exists, the
-   * request is not a repeat, the table is enabled, the table is online, and the
-   * table is not busy.
+   * Checked in the documented order, first failure wins, all inside `exclusive`
+   * so nothing changes between the checks and the driver call: the caller owns
+   * the table, the design exists, the request is not a repeat, then the drawing
+   * conditions: the table is enabled, this session is paired with it, it is
+   * online, it is free, and its plan includes the feature.
+   *
+   * A repeat returns the original job without checking the conditions again, so
+   * a retry after a lost response never fails because the pairing lapsed or the
+   * job is now holding the table.
    *
    * If the driver refuses the job (`DriverError`), the job exists and is `failed`
    * with the driver's error code, and that job is returned: the app shows it like
-   * any other failure.
+   * any other failure. A new job extends the session's pairing.
    *
    * @throws DomainException `TABLE_NOT_FOUND`, `DESIGN_NOT_FOUND`,
-   *   `IDEMPOTENCY_CONFLICT`, `TABLE_DISABLED`, `TABLE_OFFLINE`, `TABLE_BUSY`
+   *   `IDEMPOTENCY_CONFLICT`, `TABLE_DISABLED`, `PAIRING_REQUIRED`,
+   *   `TABLE_OFFLINE`, `TABLE_BUSY`, `FEATURE_NOT_IN_PLAN`
    */
-  start(tableId: string, request: StartJobRequest): Promise<StartedJob> {
+  start(tableId: string, request: StartJobRequest, caller: Authenticated): Promise<StartedJob> {
     return this.exclusive(async () => {
-      const table = await this.tables.get(tableId);
+      const table = await this.tables.getFor(tableId, caller.account, 'command');
       const design = this.designs.get(request.designId);
 
       const earlier = await this.jobs.findByClientRequestId(tableId, request.clientRequestId);
@@ -149,10 +167,23 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
         throw new DomainException('TABLE_DISABLED', `Table ${tableId} is switched off.`);
       }
 
+      this.requirePairing(caller, tableId);
+
       const status = await this.driver.getStatus(tableId);
 
       if (status.connection === 'offline' || status.connection === 'error') {
         throw new DomainException('TABLE_OFFLINE', `Table ${tableId} is ${status.connection}.`);
+      }
+
+      if ((await this.jobs.findActive(tableId)) !== undefined) {
+        throw tableBusy(tableId);
+      }
+
+      if (!featuresFor(table).includes(FEATURE_FOR_START.design)) {
+        throw new DomainException(
+          'FEATURE_NOT_IN_PLAN',
+          `The plan of table ${tableId} does not include ${FEATURE_FOR_START.design}.`,
+        );
       }
 
       const now = this.now();
@@ -176,10 +207,12 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
         return this.repeat(inserted.job, request.designId);
       }
 
+      // Checked above too; the repository decides it atomically all the same.
       if (inserted.kind === 'busy') {
-        throw new DomainException('TABLE_BUSY', `Table ${tableId} already has an active job.`);
+        throw tableBusy(tableId);
       }
 
+      this.pairings.pair(caller.sessionId, tableId);
       this.logger.log(
         `Job ${job.id} queued on table ${tableId} (design ${job.designId}, ${job.mode})`,
       );
@@ -226,30 +259,39 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
   // Commands
   // -------------------------------------------------------------------------
 
-  pause(jobId: string): Promise<DrawingJob> {
-    return this.command(jobId, 'pause');
+  /** The caller's ownership of the job's table is checked by the controller. */
+  pause(jobId: string, caller: Authenticated): Promise<DrawingJob> {
+    return this.command(jobId, 'pause', caller);
   }
 
-  resume(jobId: string): Promise<DrawingJob> {
-    return this.command(jobId, 'resume');
+  resume(jobId: string, caller: Authenticated): Promise<DrawingJob> {
+    return this.command(jobId, 'resume', caller);
   }
 
-  stop(jobId: string): Promise<DrawingJob> {
-    return this.command(jobId, 'stop');
+  stop(jobId: string, caller: Authenticated): Promise<DrawingJob> {
+    return this.command(jobId, 'stop', caller);
   }
 
   /**
    * Run a command on a job.
    *
+   * Pause and resume need the caller's session to be paired with the job's
+   * table. Stop does not: it is the safety action, so the owner can always end a
+   * drawing. A successful command extends the pairing, if there is one.
+   *
    * The driver is asked first what the table is really doing, so the command is
    * judged against fresh state; then the job's state is judged by the machine; then
    * the driver is told; then the new state is read back from the driver.
    *
-   * @throws DomainException `JOB_NOT_FOUND`, `INVALID_TRANSITION`
+   * @throws DomainException `JOB_NOT_FOUND`, `PAIRING_REQUIRED`, `INVALID_TRANSITION`
    */
-  private command(jobId: string, command: JobCommand): Promise<DrawingJob> {
+  private command(jobId: string, command: JobCommand, caller: Authenticated): Promise<DrawingJob> {
     return this.exclusive(async () => {
-      let job = await this.refreshed(await this.get(jobId));
+      const found = await this.get(jobId);
+      if (command !== 'stop') {
+        this.requirePairing(caller, found.tableId);
+      }
+      let job = await this.refreshed(found);
 
       if (!transition(job.state, command).ok) {
         throw this.invalid(command, job);
@@ -268,12 +310,25 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
       }
 
       job = await this.refreshed(await this.get(jobId));
+      if (this.pairings.isPaired(caller.sessionId, job.tableId)) {
+        this.pairings.pair(caller.sessionId, job.tableId);
+      }
 
       // A driver that has not yet reported the change in its status: trust the command.
       return isActiveJobState(job.state) && transition(job.state, command).ok
         ? this.settle(job, command)
         : job;
     });
+  }
+
+  /** @throws DomainException `PAIRING_REQUIRED` */
+  private requirePairing(caller: Authenticated, tableId: string): void {
+    if (!this.pairings.isPaired(caller.sessionId, tableId)) {
+      throw new DomainException(
+        'PAIRING_REQUIRED',
+        `Pair with table ${tableId} first (POST /api/v1/tables/${tableId}/pairing).`,
+      );
+    }
   }
 
   private invalid(command: JobCommand, job: DrawingJob): DomainException {
@@ -416,4 +471,8 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
 
     this.subscriptions.clear();
   }
+}
+
+function tableBusy(tableId: string): DomainException {
+  return new DomainException('TABLE_BUSY', `Table ${tableId} already has an active job.`);
 }

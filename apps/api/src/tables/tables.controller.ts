@@ -1,7 +1,19 @@
-import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
-import { tableParamsSchema, type Table, type TableParams } from '@athar/contracts';
+import {
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { tableParamsSchema, type Pairing, type Table, type TableParams } from '@athar/contracts';
 import { SessionGuard, type AuthenticatedRequest } from '../auth/session.guard.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
+import { PairingStore } from './pairing-store.js';
+import { TableRegistry } from './table-registry.service.js';
 import { TablesService } from './tables.service.js';
 
 /**
@@ -14,13 +26,40 @@ import { TablesService } from './tables.service.js';
 @Controller('tables')
 @UseGuards(SessionGuard)
 export class TablesController {
-  constructor(private readonly tables: TablesService) {}
+  constructor(
+    private readonly tables: TablesService,
+    private readonly registry: TableRegistry,
+    private readonly pairings: PairingStore,
+  ) {}
 
   @Get(':tableId')
   get(
     @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
     @Req() request: AuthenticatedRequest,
   ): Promise<Table> {
-    return this.tables.getTableFor(params.tableId, request.auth.account);
+    return this.tables.getTableFor(params.tableId, request.auth);
+  }
+
+  /** Pair this session with the table, or extend its pairing (D9). Owner only; always `200`. */
+  @Post(':tableId/pairing')
+  @HttpCode(HttpStatus.OK)
+  async pair(
+    @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<Pairing> {
+    await this.registry.getFor(params.tableId, request.auth.account, 'command');
+
+    return this.pairings.pair(request.auth.sessionId, params.tableId);
+  }
+
+  /** End this session's pairing with the table. Owner only; `204` even if there was none. */
+  @Delete(':tableId/pairing')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async unpair(
+    @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.registry.getFor(params.tableId, request.auth.account, 'command');
+    this.pairings.unpair(request.auth.sessionId, params.tableId);
   }
 }
