@@ -13,18 +13,21 @@ import {
   getTableResponseSchema,
   healthResponseSchema,
   jobCommandResponseSchema,
+  listAmbiencesResponseSchema,
   listDesignsResponseSchema,
   listJobsResponseSchema,
   readyResponseSchema,
+  setAmbienceRequestSchema,
   startJobRequestSchema,
   startJobResponseSchema,
   type DesignDetail,
   type DrawingJob,
   type HealthResponse,
+  type ListAmbiencesResponse,
   type ListDesignsResponse,
   type ListJobsResponse,
   type ReadyResponse,
-  type StartJobRequest,
+  type StartJobRequestInput,
   type Table,
 } from '@athar/contracts';
 import type { AppEnvironment } from '../config/env';
@@ -110,17 +113,41 @@ export class AtharApiClient {
   }
 
   /**
-   * Ask a table to draw a design.
+   * Ask a table to draw: a catalogue design (`kind` may be left out), a
+   * freehand `path`, or the `rake`.
    *
    * `clientRequestId` makes the call idempotent: reuse the same id when retrying
    * the same start, and create a new one for a deliberate second drawing. A
    * repeat returns the original job rather than starting another.
    */
-  startJob(tableId: string, request: StartJobRequest, signal?: AbortSignal): Promise<DrawingJob> {
+  startJob(
+    tableId: string,
+    request: StartJobRequestInput,
+    signal?: AbortSignal,
+  ): Promise<DrawingJob> {
     return this.http.post(
       `${API_V1_PREFIX}/tables/${segment(tableId)}/jobs`,
       startJobRequestSchema.parse(request),
       startJobResponseSchema,
+      signal ? { signal } : {},
+    );
+  }
+
+  /** The LED ambiences a table with `ledAmbiences` can show. */
+  listAmbiences(signal?: AbortSignal): Promise<ListAmbiencesResponse> {
+    return this.http.get(
+      `${API_V1_PREFIX}/ambiences`,
+      listAmbiencesResponseSchema,
+      signal ? { signal } : {},
+    );
+  }
+
+  /** Show an LED ambience on the table. Returns the updated table. */
+  setAmbience(tableId: string, ambienceId: string, signal?: AbortSignal): Promise<Table> {
+    return this.http.put(
+      `${API_V1_PREFIX}/tables/${segment(tableId)}/ambience`,
+      setAmbienceRequestSchema.parse({ ambienceId }),
+      getTableResponseSchema,
       signal ? { signal } : {},
     );
   }

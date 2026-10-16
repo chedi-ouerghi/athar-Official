@@ -83,6 +83,7 @@ describe('SimulatedTableDriver', () => {
         jobId: null,
         progress: 0,
         errorCode: null,
+        ambienceId: null,
         observedAt: new Date(clock.now()).toISOString(),
       });
     });
@@ -776,6 +777,34 @@ describe('SimulatedTableDriver', () => {
 
       expect(scheduler.active).toBe(0);
       await expect(driver.getStatus(TABLE)).resolves.toMatchObject({ phase: 'idle' });
+    });
+  });
+
+  describe('LED ambience', () => {
+    it('stores and announces it, without disturbing a drawing', async () => {
+      const { driver, clock, record } = setup();
+      const events = record();
+
+      await driver.startJob(TABLE, request('job-1'));
+      clock.advanceSeconds(25);
+      await driver.setAmbience(TABLE, 'amber');
+
+      expect(await driver.getStatus(TABLE)).toMatchObject({
+        phase: 'drawing',
+        progress: 0.25,
+        ambienceId: 'amber',
+      });
+      expect(events.at(-1)).toMatchObject({ ambienceId: 'amber' });
+    });
+
+    it('refuses it while the table is offline or in error', async () => {
+      const { driver } = setup();
+
+      driver.simulateConnection(TABLE, 'offline');
+      await expect(driver.setAmbience(TABLE, 'amber')).rejects.toMatchObject({ code: 'OFFLINE' });
+      driver.simulateConnection(TABLE, 'error');
+      await expect(driver.setAmbience(TABLE, 'amber')).rejects.toMatchObject({ code: 'FAULT' });
+      expect((await driver.getStatus(TABLE)).ambienceId).toBeNull();
     });
   });
 });

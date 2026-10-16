@@ -117,6 +117,7 @@ describe('the full journey', () => {
       plan: 'basic',
       voiceAssistant: false,
       features: ['catalogue', 'rake'],
+      ambienceId: null,
       readiness: { paired: true, online: true, free: true, canStart: true },
     });
 
@@ -135,6 +136,7 @@ describe('the full journey', () => {
 
     expect(job).toMatchObject({
       tableId,
+      kind: 'design',
       designId: 'star',
       mode: 'simulation',
       state: 'drawing',

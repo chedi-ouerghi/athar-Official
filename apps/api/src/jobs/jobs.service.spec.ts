@@ -46,6 +46,9 @@ class ScriptedDriver implements TableDriver {
   pause = vi.fn<(tableId: string, jobId: string) => Promise<void>>(() => Promise.resolve());
   resume = vi.fn<(tableId: string, jobId: string) => Promise<void>>(() => Promise.resolve());
   stop = vi.fn<(tableId: string, jobId: string) => Promise<void>>(() => Promise.resolve());
+  setAmbience = vi.fn<(tableId: string, ambienceId: string) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
 
   static idle(): DriverStatus {
     return {
@@ -56,6 +59,7 @@ class ScriptedDriver implements TableDriver {
       jobId: null,
       progress: 0,
       errorCode: null,
+      ambienceId: null,
       observedAt: '2026-01-01T00:00:00.000Z',
     };
   }
@@ -126,6 +130,7 @@ function build(driver?: TableDriver, historyLimit = 5) {
     repository,
     service,
     request: (designId = 'star', clientRequestId: string = randomUUID()) => ({
+      kind: 'design' as const,
       designId,
       clientRequestId,
     }),

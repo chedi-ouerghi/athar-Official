@@ -96,6 +96,13 @@ export interface TableDriver {
   stop(tableId: string, jobId: string): Promise<void>;
 
   /**
+   * Show an LED ambience. Independent of drawing: it may change while a job runs.
+   * The id is one the API has checked; the driver maps it to its own colours.
+   * Rejects with `DriverError` (`OFFLINE`, `FAULT`) when the table cannot take it.
+   */
+  setAmbience(tableId: string, ambienceId: string): Promise<void>;
+
+  /**
    * Receive every status change and progress update for one table, in order.
    * Returns a function that ends the subscription.
    */

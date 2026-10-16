@@ -39,6 +39,7 @@ describe('table', () => {
     plan: 'personalized',
     voiceAssistant: true,
     features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences', 'voiceAssistant'],
+    ambienceId: 'amber',
     readiness: { paired: true, online: true, free: true, canStart: true },
   };
 

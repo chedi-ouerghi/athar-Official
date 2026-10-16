@@ -65,6 +65,8 @@ export const driverStatusSchema = z.object({
   /** Fraction of the trajectory completed. 0 when there is no job. */
   progress: z.number().min(0).max(1),
   errorCode: driverErrorCodeSchema.nullable(),
+  /** LED ambience the table shows, or `null` before one was ever set. */
+  ambienceId: z.string().min(1).nullable(),
   /** ISO-8601 UTC time at which the driver observed this state. */
   observedAt: z.string(),
 });

@@ -125,7 +125,7 @@ function JobBody({
     <Screen testID="job-screen">
       <ModeBadge mode={job.mode} testID="job-mode" />
 
-      {design.state.status === 'ready' ? (
+      {design.state.status === 'ready' && design.state.data !== null ? (
         <DesignPreview
           path={design.state.data.previewPath}
           progress={job.progress}

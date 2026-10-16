@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -6,10 +7,18 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { tableParamsSchema, type Pairing, type Table, type TableParams } from '@athar/contracts';
+import {
+  setAmbienceRequestSchema,
+  tableParamsSchema,
+  type Pairing,
+  type SetAmbienceRequest,
+  type Table,
+  type TableParams,
+} from '@athar/contracts';
 import { SessionGuard, type AuthenticatedRequest } from '../auth/session.guard.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
 import { PairingStore } from './pairing-store.js';
@@ -50,6 +59,16 @@ export class TablesController {
     await this.registry.getFor(params.tableId, request.auth.account, 'command');
 
     return this.pairings.pair(request.auth.sessionId, params.tableId);
+  }
+
+  /** Show an LED ambience (`ledAmbiences` feature). Owner, paired, online; returns the table. */
+  @Put(':tableId/ambience')
+  setAmbience(
+    @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
+    @Body(new ZodValidationPipe(setAmbienceRequestSchema)) body: SetAmbienceRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<Table> {
+    return this.tables.setAmbience(params.tableId, body.ambienceId, request.auth);
   }
 
   /** End this session's pairing with the table. Owner only; `204` even if there was none. */

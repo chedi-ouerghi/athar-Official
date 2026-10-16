@@ -10,6 +10,7 @@ function job(overrides: Partial<DrawingJob> = {}): DrawingJob {
   return {
     id: `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`,
     tableId: 'table-001',
+    kind: 'design',
     designId: 'star',
     mode: 'simulation',
     state: 'queued',
@@ -25,6 +26,9 @@ function job(overrides: Partial<DrawingJob> = {}): DrawingJob {
 
 const request = (n: number) => `request-${n}`;
 
+/** What the service stores to recognise a repeated request; the repository only keeps it. */
+const FINGERPRINT = 'design:star';
+
 /** Store a job and finish it, as the service would. */
 async function insertFinished(
   repository: InMemoryJobRepository,
@@ -34,7 +38,7 @@ async function insertFinished(
 ): Promise<DrawingJob> {
   const created = job({ tableId });
 
-  await repository.insertIfNoActive(created, request(n));
+  await repository.insertIfNoActive(created, request(n), FINGERPRINT);
   const finished = { ...created, state };
 
   await repository.update(finished);
@@ -54,7 +58,7 @@ describe('InMemoryJobRepository', () => {
       const repository = new InMemoryJobRepository(10);
       const first = job();
 
-      expect(await repository.insertIfNoActive(first, request(1))).toStrictEqual({
+      expect(await repository.insertIfNoActive(first, request(1), FINGERPRINT)).toStrictEqual({
         kind: 'inserted',
       });
       expect(await repository.get(first.id)).toStrictEqual(first);
@@ -67,9 +71,9 @@ describe('InMemoryJobRepository', () => {
         const repository = new InMemoryJobRepository(10);
         const running = job({ state });
 
-        await repository.insertIfNoActive(running, request(1));
+        await repository.insertIfNoActive(running, request(1), FINGERPRINT);
 
-        expect(await repository.insertIfNoActive(job(), request(2))).toStrictEqual({
+        expect(await repository.insertIfNoActive(job(), request(2), FINGERPRINT)).toStrictEqual({
           kind: 'busy',
           activeJobId: running.id,
         });
@@ -83,7 +87,7 @@ describe('InMemoryJobRepository', () => {
         const repository = new InMemoryJobRepository(10);
         await insertFinished(repository, 1, 'table-001', state);
 
-        expect(await repository.insertIfNoActive(job(), request(2))).toStrictEqual({
+        expect(await repository.insertIfNoActive(job(), request(2), FINGERPRINT)).toStrictEqual({
           kind: 'inserted',
         });
       },
@@ -92,10 +96,10 @@ describe('InMemoryJobRepository', () => {
     it('keeps tables independent: one busy table does not block another', async () => {
       const repository = new InMemoryJobRepository(10);
 
-      await repository.insertIfNoActive(job({ tableId: 'table-001' }), request(1));
+      await repository.insertIfNoActive(job({ tableId: 'table-001' }), request(1), FINGERPRINT);
 
       expect(
-        await repository.insertIfNoActive(job({ tableId: 'table-002' }), request(2)),
+        await repository.insertIfNoActive(job({ tableId: 'table-002' }), request(2), FINGERPRINT),
       ).toStrictEqual({ kind: 'inserted' });
     });
 
@@ -103,8 +107,8 @@ describe('InMemoryJobRepository', () => {
       const repository = new InMemoryJobRepository(10);
       const original = job();
 
-      await repository.insertIfNoActive(original, request(1));
-      const result = await repository.insertIfNoActive(job(), request(1));
+      await repository.insertIfNoActive(original, request(1), FINGERPRINT);
+      const result = await repository.insertIfNoActive(job(), request(1), FINGERPRINT);
 
       expect(result).toStrictEqual({ kind: 'replayed', job: original });
       expect(await repository.listRecent('table-001', 10)).toHaveLength(1);
@@ -114,19 +118,21 @@ describe('InMemoryJobRepository', () => {
       const repository = new InMemoryJobRepository(10);
       const original = job();
 
-      await repository.insertIfNoActive(original, request(1));
+      await repository.insertIfNoActive(original, request(1), FINGERPRINT);
 
       // The table is busy with exactly this job, and the same request repeats.
-      expect((await repository.insertIfNoActive(job(), request(1))).kind).toBe('replayed');
+      expect((await repository.insertIfNoActive(job(), request(1), FINGERPRINT)).kind).toBe(
+        'replayed',
+      );
       // A different request is busy.
-      expect((await repository.insertIfNoActive(job(), request(2))).kind).toBe('busy');
+      expect((await repository.insertIfNoActive(job(), request(2), FINGERPRINT)).kind).toBe('busy');
     });
 
     it('still returns the job for a repeat after that job has finished', async () => {
       const repository = new InMemoryJobRepository(10);
       const finished = await insertFinished(repository, 1);
 
-      expect(await repository.insertIfNoActive(job(), request(1))).toStrictEqual({
+      expect(await repository.insertIfNoActive(job(), request(1), FINGERPRINT)).toStrictEqual({
         kind: 'replayed',
         job: finished,
       });
@@ -135,10 +141,11 @@ describe('InMemoryJobRepository', () => {
     it('scopes request ids to the table: the same id on another table is a new request', async () => {
       const repository = new InMemoryJobRepository(10);
 
-      await repository.insertIfNoActive(job({ tableId: 'table-001' }), request(1));
+      await repository.insertIfNoActive(job({ tableId: 'table-001' }), request(1), FINGERPRINT);
 
       expect(
-        (await repository.insertIfNoActive(job({ tableId: 'table-002' }), request(1))).kind,
+        (await repository.insertIfNoActive(job({ tableId: 'table-002' }), request(1), FINGERPRINT))
+          .kind,
       ).toBe('inserted');
     });
 
@@ -147,7 +154,9 @@ describe('InMemoryJobRepository', () => {
         const repository = new InMemoryJobRepository(10);
 
         const results = await Promise.all(
-          Array.from({ length: 100 }, (_, n) => repository.insertIfNoActive(job(), request(n))),
+          Array.from({ length: 100 }, (_, n) =>
+            repository.insertIfNoActive(job(), request(n), FINGERPRINT),
+          ),
         );
 
         expect(results.filter((result) => result.kind === 'inserted')).toHaveLength(1);
@@ -159,7 +168,9 @@ describe('InMemoryJobRepository', () => {
         const repository = new InMemoryJobRepository(10);
 
         const results = await Promise.all(
-          Array.from({ length: 50 }, () => repository.insertIfNoActive(job(), request(1))),
+          Array.from({ length: 50 }, () =>
+            repository.insertIfNoActive(job(), request(1), FINGERPRINT),
+          ),
         );
 
         expect(results.filter((result) => result.kind === 'inserted')).toHaveLength(1);
@@ -172,9 +183,9 @@ describe('InMemoryJobRepository', () => {
 
         // No await: if the check and the insert were separated by one, the second call
         // below could not already see the first job.
-        void repository.insertIfNoActive(job(), request(1));
-        const second = repository.insertIfNoActive(job(), request(2));
-        void repository.insertIfNoActive(job({ tableId: 'table-002' }), request(3));
+        void repository.insertIfNoActive(job(), request(1), FINGERPRINT);
+        const second = repository.insertIfNoActive(job(), request(2), FINGERPRINT);
+        void repository.insertIfNoActive(job({ tableId: 'table-002' }), request(3), FINGERPRINT);
 
         return expect(second).resolves.toMatchObject({ kind: 'busy' });
       });
@@ -186,10 +197,11 @@ describe('InMemoryJobRepository', () => {
       const repository = new InMemoryJobRepository(10);
       const stored = job();
 
-      await repository.insertIfNoActive(stored, request(1));
+      await repository.insertIfNoActive(stored, request(1), FINGERPRINT);
 
       expect(await repository.findByClientRequestId('table-001', request(1))).toStrictEqual(stored);
       expect(await repository.findByClientRequestId('table-001', request(2))).toBeUndefined();
+      expect(await repository.fingerprintOf(stored.id)).toBe(FINGERPRINT);
       expect(await repository.findByClientRequestId('table-002', request(1))).toBeUndefined();
     });
 
@@ -212,7 +224,7 @@ describe('InMemoryJobRepository', () => {
     it('replaces the stored job, and the change is seen by every lookup', async () => {
       const repository = new InMemoryJobRepository(10);
       const stored = job();
-      await repository.insertIfNoActive(stored, request(1));
+      await repository.insertIfNoActive(stored, request(1), FINGERPRINT);
 
       await repository.update({ ...stored, state: 'drawing', progress: 0.5 });
 
@@ -234,11 +246,13 @@ describe('InMemoryJobRepository', () => {
     it('frees the table when the active job finishes', async () => {
       const repository = new InMemoryJobRepository(10);
       const stored = job();
-      await repository.insertIfNoActive(stored, request(1));
+      await repository.insertIfNoActive(stored, request(1), FINGERPRINT);
 
       await repository.update({ ...stored, state: 'cancelled' });
 
-      expect((await repository.insertIfNoActive(job(), request(2))).kind).toBe('inserted');
+      expect((await repository.insertIfNoActive(job(), request(2), FINGERPRINT)).kind).toBe(
+        'inserted',
+      );
     });
   });
 
@@ -246,7 +260,7 @@ describe('InMemoryJobRepository', () => {
     it('hands out copies, so a caller cannot change what is stored', async () => {
       const repository = new InMemoryJobRepository(10);
       const stored = job();
-      await repository.insertIfNoActive(stored, request(1));
+      await repository.insertIfNoActive(stored, request(1), FINGERPRINT);
 
       const fetched = (await repository.get(stored.id))!;
       fetched.state = 'completed';
@@ -259,7 +273,7 @@ describe('InMemoryJobRepository', () => {
     it('stores a copy of what it is given', async () => {
       const repository = new InMemoryJobRepository(10);
       const stored = job();
-      await repository.insertIfNoActive(stored, request(1));
+      await repository.insertIfNoActive(stored, request(1), FINGERPRINT);
 
       stored.state = 'completed';
 
@@ -330,7 +344,9 @@ describe('InMemoryJobRepository', () => {
 
       expect(await repository.findByClientRequestId('table-001', request(1))).toBeUndefined();
       expect(await repository.findByClientRequestId('table-001', request(2))).toBeDefined();
-      expect((await repository.insertIfNoActive(job(), request(1))).kind).toBe('inserted');
+      expect((await repository.insertIfNoActive(job(), request(1), FINGERPRINT)).kind).toBe(
+        'inserted',
+      );
     });
 
     it('keeps the idempotency entries of the jobs it still remembers', async () => {
@@ -339,7 +355,9 @@ describe('InMemoryJobRepository', () => {
       await insertFinished(repository, 1);
       await insertFinished(repository, 2);
 
-      expect((await repository.insertIfNoActive(job(), request(2))).kind).toBe('replayed');
+      expect((await repository.insertIfNoActive(job(), request(2), FINGERPRINT)).kind).toBe(
+        'replayed',
+      );
     });
 
     it('applies the limit per table, not across them', async () => {
@@ -359,7 +377,7 @@ describe('InMemoryJobRepository', () => {
       await insertFinished(repository, 1);
       const running = job();
 
-      await repository.insertIfNoActive(running, request(2));
+      await repository.insertIfNoActive(running, request(2), FINGERPRINT);
 
       expect((await repository.listRecent('table-001', 10)).map((j) => j.id)).toStrictEqual([
         running.id,

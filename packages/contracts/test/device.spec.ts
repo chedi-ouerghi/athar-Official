@@ -9,6 +9,7 @@ const status = {
   jobId: null,
   progress: 0,
   errorCode: null,
+  ambienceId: null,
   observedAt: '2026-01-01T00:00:00.000Z',
 };
 

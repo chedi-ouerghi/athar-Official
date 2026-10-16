@@ -19,7 +19,7 @@
  * is *also* atomic where it decides busy and repeat requests, so correctness never
  * rests on this lock alone.)
  *
- * Logging: job lifecycle lines carry the job id, the table id, the design id, the
+ * Logging: job lifecycle lines carry the job id, the table id, the kind and design id, the
  * mode and states. There is no personal data on a job to log, and the client's
  * request id is not logged either.
  *
@@ -27,11 +27,10 @@
  */
 
 import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   featuresFor,
   isActiveJobState,
-  type DesignDetail,
   type DrawingJob,
   type Feature,
   type JobErrorCode,
@@ -49,7 +48,7 @@ import {
   type TableDriver,
   type Unsubscribe,
 } from '../device/table-driver.js';
-import { DesignsService } from '../designs/designs.service.js';
+import { DesignsService, type DrawingPlan } from '../designs/designs.service.js';
 import { PairingStore } from '../tables/pairing-store.js';
 import { TableRegistry } from '../tables/table-registry.service.js';
 import type { ActiveJobLookup } from '../tables/active-job-lookup.js';
@@ -62,11 +61,27 @@ import {
 } from './job-state-machine.js';
 import { JOB_REPOSITORY, type JobRepository } from './job-repository.js';
 
+/** The feature each kind of start needs from the table's plan (decision D3). */
+const FEATURE_FOR_START = {
+  design: 'catalogue',
+  path: 'drawingPen',
+  rake: 'rake',
+} as const satisfies Record<StartJobRequest['kind'], Feature>;
+
 /**
- * The feature each kind of start needs from the table's plan. Today every start
- * draws a catalogue design; a new kind of start adds its line here.
+ * What a start asked for, in a form two requests can be compared by: the design
+ * id, the rake, or a SHA-256 of the path as parsed (same points, same hash).
  */
-const FEATURE_FOR_START = { design: 'catalogue' } as const satisfies Record<string, Feature>;
+function fingerprintOf(request: StartJobRequest): string {
+  switch (request.kind) {
+    case 'design':
+      return `design:${request.designId}`;
+    case 'path':
+      return `path:${createHash('sha256').update(JSON.stringify(request.path)).digest('hex')}`;
+    case 'rake':
+      return 'rake';
+  }
+}
 
 export interface StartedJob {
   readonly job: DrawingJob;
@@ -138,7 +153,8 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
    * so nothing changes between the checks and the driver call: the caller owns
    * the table, the design exists, the request is not a repeat, then the drawing
    * conditions: the table is enabled, this session is paired with it, it is
-   * online, it is free, and its plan includes the feature.
+   * online, it is free, and its plan includes the feature the request's kind
+   * needs. Only then is a freehand path joined up and checked.
    *
    * A repeat returns the original job without checking the conditions again, so
    * a retry after a lost response never fails because the pairing lapsed or the
@@ -150,17 +166,19 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
    *
    * @throws DomainException `TABLE_NOT_FOUND`, `DESIGN_NOT_FOUND`,
    *   `IDEMPOTENCY_CONFLICT`, `TABLE_DISABLED`, `PAIRING_REQUIRED`,
-   *   `TABLE_OFFLINE`, `TABLE_BUSY`, `FEATURE_NOT_IN_PLAN`
+   *   `TABLE_OFFLINE`, `TABLE_BUSY`, `FEATURE_NOT_IN_PLAN`, and
+   *   `VALIDATION_FAILED` for a path that cannot be drawn
    */
   start(tableId: string, request: StartJobRequest, caller: Authenticated): Promise<StartedJob> {
     return this.exclusive(async () => {
       const table = await this.tables.getFor(tableId, caller.account, 'command');
-      const design = this.designs.get(request.designId);
+      const design = request.kind === 'design' ? this.designs.get(request.designId) : undefined;
+      const fingerprint = fingerprintOf(request);
 
       const earlier = await this.jobs.findByClientRequestId(tableId, request.clientRequestId);
 
       if (earlier !== undefined) {
-        return this.repeat(earlier, request.designId);
+        return this.repeat(earlier, fingerprint);
       }
 
       if (!table.enabled) {
@@ -179,18 +197,32 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
         throw tableBusy(tableId);
       }
 
-      if (!featuresFor(table).includes(FEATURE_FOR_START.design)) {
+      const feature = FEATURE_FOR_START[request.kind];
+
+      if (!featuresFor(table).includes(feature)) {
         throw new DomainException(
           'FEATURE_NOT_IN_PLAN',
-          `The plan of table ${tableId} does not include ${FEATURE_FOR_START.design}.`,
+          `The plan of table ${tableId} does not include ${feature}.`,
         );
       }
+
+      // Built last: a freehand path is joined up and checked here (`VALIDATION_FAILED`).
+      const plan: DrawingPlan =
+        design !== undefined
+          ? {
+              trajectory: this.designs.getTrajectory(design.id),
+              estimatedDurationSeconds: design.estimatedDurationSeconds,
+            }
+          : request.kind === 'path'
+            ? this.designs.freehand(request.path)
+            : this.designs.rake();
 
       const now = this.now();
       const job: DrawingJob = {
         id: randomUUID(),
         tableId,
-        designId: design.id,
+        kind: request.kind,
+        designId: design?.id ?? null,
         mode: this.driver.mode,
         state: 'queued',
         progress: 0,
@@ -201,10 +233,10 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
         errorCode: null,
       };
 
-      const inserted = await this.jobs.insertIfNoActive(job, request.clientRequestId);
+      const inserted = await this.jobs.insertIfNoActive(job, request.clientRequestId, fingerprint);
 
       if (inserted.kind === 'replayed') {
-        return this.repeat(inserted.job, request.designId);
+        return this.repeat(inserted.job, fingerprint);
       }
 
       // Checked above too; the repository decides it atomically all the same.
@@ -214,20 +246,20 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
 
       this.pairings.pair(caller.sessionId, tableId);
       this.logger.log(
-        `Job ${job.id} queued on table ${tableId} (design ${job.designId}, ${job.mode})`,
+        `Job ${job.id} queued on table ${tableId} (${job.kind}${job.designId === null ? '' : ` ${job.designId}`}, ${job.mode})`,
       );
       this.listenTo(tableId);
 
-      return { job: await this.hand(job, design), created: true };
+      return { job: await this.hand(job, plan), created: true };
     });
   }
 
   /** The answer to a request that repeats an earlier one. */
-  private repeat(earlier: DrawingJob, designId: string): StartedJob {
-    if (earlier.designId !== designId) {
+  private async repeat(earlier: DrawingJob, fingerprint: string): Promise<StartedJob> {
+    if ((await this.jobs.fingerprintOf(earlier.id)) !== fingerprint) {
       throw new DomainException(
         'IDEMPOTENCY_CONFLICT',
-        'This request id was already used for a different design.',
+        'This request id was already used for a different drawing.',
       );
     }
 
@@ -235,13 +267,9 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
   }
 
   /** Give a queued job to the driver, and settle what happens next. */
-  private async hand(job: DrawingJob, design: DesignDetail): Promise<DrawingJob> {
+  private async hand(job: DrawingJob, plan: DrawingPlan): Promise<DrawingJob> {
     try {
-      await this.driver.startJob(job.tableId, {
-        jobId: job.id,
-        trajectory: this.designs.getTrajectory(design.id),
-        estimatedDurationSeconds: design.estimatedDurationSeconds,
-      });
+      await this.driver.startJob(job.tableId, { jobId: job.id, ...plan });
     } catch (error) {
       if (error instanceof DriverError) {
         return this.fail(job, error.code, `the driver refused it (${error.code})`);

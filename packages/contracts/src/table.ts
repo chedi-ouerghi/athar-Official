@@ -54,6 +54,8 @@ export const tableSchema = z.object({
   voiceAssistant: z.boolean(),
   /** What the table can do, derived from `plan` and `voiceAssistant` by `featuresFor`. */
   features: z.array(featureSchema),
+  /** LED ambience the table shows (from the driver), or `null` before one was set. */
+  ambienceId: z.string().min(1).nullable(),
   /** The drawing conditions, for the calling session. */
   readiness: tableReadinessSchema,
 });

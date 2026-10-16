@@ -1,11 +1,11 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { act, renderHook } from '@testing-library/react-native';
-import type { DrawingJob, StartJobRequest } from '@athar/contracts';
+import type { DrawingJob, StartJobRequestInput } from '@athar/contracts';
 import { appWrapper, stubClient } from '../../test-utils';
 import { TABLE_ID, apiError, job, networkError } from '../../test-fixtures';
 import { useStartJob } from './useStartJob';
 
-type StartJob = (tableId: string, request: StartJobRequest) => Promise<DrawingJob>;
+type StartJob = (tableId: string, request: StartJobRequestInput) => Promise<DrawingJob>;
 
 function setup(startJob: jest.Mock<StartJob>) {
   const client = stubClient({ startJob: startJob as never });

@@ -17,6 +17,7 @@ export function table(overrides: Partial<Table> = {}): Table {
     plan: 'basic',
     voiceAssistant: false,
     features: ['catalogue', 'rake'],
+    ambienceId: null,
     readiness: { paired: true, online: true, free: true, canStart: true },
     ...overrides,
   };
@@ -48,6 +49,7 @@ export function job(overrides: Partial<DrawingJob> = {}): DrawingJob {
   return {
     id: JOB_ID,
     tableId: TABLE_ID,
+    kind: 'design',
     designId: 'dunes',
     mode: 'simulation',
     state: 'drawing',

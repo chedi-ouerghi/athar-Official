@@ -59,6 +59,7 @@ describe('tables over HTTP', () => {
         plan: 'basic',
         voiceAssistant: false,
         features: ['catalogue', 'rake'],
+        ambienceId: null,
         // Not paired yet, so it cannot start.
         readiness: { paired: false, online: true, free: true, canStart: false },
       });

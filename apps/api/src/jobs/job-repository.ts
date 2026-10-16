@@ -28,11 +28,21 @@ export interface JobRepository {
    * idempotency); otherwise a table with an active job is `busy`; otherwise the
    * job is stored. Storing it may evict the oldest finished jobs of the table, and
    * their idempotency entries with them.
+   *
+   * `fingerprint` identifies what was asked for (a design, a path's hash, the
+   * rake), so a repeat with the same id but another request can be told apart.
    */
-  insertIfNoActive(job: DrawingJob, clientRequestId: string): Promise<InsertResult>;
+  insertIfNoActive(
+    job: DrawingJob,
+    clientRequestId: string,
+    fingerprint: string,
+  ): Promise<InsertResult>;
 
   /** The job a (table, client request id) pair created, while it is still remembered. */
   findByClientRequestId(tableId: string, clientRequestId: string): Promise<DrawingJob | undefined>;
+
+  /** The fingerprint stored with a job by `insertIfNoActive`, while it is remembered. */
+  fingerprintOf(jobId: string): Promise<string | undefined>;
 
   /** The table's job that is queued, drawing or paused, if any. */
   findActive(tableId: string): Promise<DrawingJob | undefined>;

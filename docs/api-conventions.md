@@ -160,6 +160,43 @@ conditions again, so a retry after a lost response cannot fail on a lapsed
 pairing. Pause and resume need ownership (`JOB_NOT_FOUND`) and a pairing
 (`PAIRING_REQUIRED`); stop, the safety action, needs ownership only.
 
+**What a start draws** (Phase 5). The body is one of three kinds, told apart by
+`kind`; each needs one feature of the table's plan:
+
+| Body                                           | Draws                       | Feature      |
+| ---------------------------------------------- | --------------------------- | ------------ |
+| `{kind?: 'design', designId, clientRequestId}` | a catalogue design          | `catalogue`  |
+| `{kind: 'path', path, clientRequestId}`        | the owner's freehand path   | `drawingPen` |
+| `{kind: 'rake', clientRequestId}`              | the rake (smooths the sand) | `rake`       |
+
+`kind` defaults to `design`, so a body without it (every client before Phase 5)
+still means a design. `path` is `[[theta, rho], ...]` in the `polar-theta-rho/v1`
+convention: 2 to `DRAWING_PATH_MAX_POINTS` (1000) points, rho within 0..1 (about
+40 kB of JSON, well inside the body cap). The API joins the points with straight
+lines, adds a line from home to the first point and back home at the end, and
+checks the result like a design ([architecture.md](architecture.md#rake-freehand-path-and-led-ambiences));
+a path it cannot draw, or longer than 120 table radii, is `VALIDATION_FAILED`.
+That check runs after the plan check, so a basic table gets `FEATURE_NOT_IN_PLAN`
+for any path. The job says what it drew: `kind`, and `designId` (`null` for a
+path or the rake). A repeated `clientRequestId` must repeat the same request:
+same kind, same design, or the same path point for point (compared by a SHA-256
+of the parsed path); anything else is `IDEMPOTENCY_CONFLICT`.
+
+**LED ambiences** (feature `ledAmbiences`):
+
+| Route                                                 | Answer                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| `GET /api/v1/ambiences`                               | `200 {ambiences: [{id, name: {en, ar}, color}]}`, any session |
+| `PUT /api/v1/tables/:tableId/ambience` `{ambienceId}` | `200` the table, now with `ambienceId`                        |
+
+The `PUT` checks, in order: session, validation, the ambience exists
+(`VALIDATION_FAILED`), the caller owns the table (`TABLE_NOT_FOUND`), enabled
+(`TABLE_DISABLED`), paired (`PAIRING_REQUIRED`), online (`TABLE_OFFLINE`), and
+the plan includes `ledAmbiences` (`FEATURE_NOT_IN_PLAN`). It works while a
+drawing runs: the light is independent of the sand. Like a job command, it
+extends the pairing. A table's `ambienceId` comes from the driver, `null` until
+one is set; the simulator forgets it when the API restarts.
+
 `GET /api/v1/tables/:tableId` carries `readiness: {paired, online, free, canStart}`
 for the calling session, with `canStart = enabled && paired && online && free`,
 so the app can say why it cannot start. An admin is never paired.

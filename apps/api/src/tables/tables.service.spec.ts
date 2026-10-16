@@ -61,6 +61,7 @@ describe('TablesService', () => {
       plan: 'basic',
       voiceAssistant: false,
       features: ['catalogue', 'rake'],
+      ambienceId: null,
       readiness: { paired: false, online: true, free: true, canStart: false },
     });
   });
@@ -116,6 +117,7 @@ describe('TablesService', () => {
 
     expect(Object.keys(await service.getTable('table-001')).sort()).toStrictEqual([
       'activeJobId',
+      'ambienceId',
       'connection',
       'displayName',
       'enabled',
@@ -223,7 +225,7 @@ describe('TablesService', () => {
       pairings.pair(owner.sessionId, 'table-001');
       const { job } = await jobs.start(
         'table-001',
-        { designId: 'star', clientRequestId: randomUUID() },
+        { kind: 'design', designId: 'star', clientRequestId: randomUUID() },
         owner,
       );
 

@@ -225,8 +225,23 @@ export class HttpClient {
     return this.send('POST', path, schema, options, body);
   }
 
+  /**
+   * Perform a PUT request with a JSON body and validate the response against
+   * `schema`.
+   *
+   * @throws ApiError for every failure mode, including a contract violation.
+   */
+  put<TSchema extends z.ZodType>(
+    path: string,
+    body: unknown,
+    schema: TSchema,
+    options: RequestOptions = {},
+  ): Promise<z.output<TSchema>> {
+    return this.send('PUT', path, schema, options, body);
+  }
+
   private async send<TSchema extends z.ZodType>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     schema: TSchema,
     options: RequestOptions,
@@ -241,7 +256,7 @@ export class HttpClient {
       [REQUEST_ID_HEADER]: requestId,
     };
 
-    if (method === 'POST') {
+    if (method !== 'GET') {
       headers['Content-Type'] = 'application/json';
     }
 
@@ -252,7 +267,7 @@ export class HttpClient {
         // A command with no payload still sends `{}`: the API validates an empty
         // object, and a body-less POST with a JSON content type is rejected by
         // some parsers.
-        ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
+        ...(method !== 'GET' ? { body: JSON.stringify(body ?? {}) } : {}),
         signal: request.signal,
       });
 

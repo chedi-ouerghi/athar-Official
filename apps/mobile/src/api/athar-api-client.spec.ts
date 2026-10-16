@@ -75,6 +75,7 @@ const TABLE = {
   plan: 'basic',
   voiceAssistant: false,
   features: ['catalogue', 'rake'],
+  ambienceId: null,
   readiness: { paired: true, online: true, free: true, canStart: true },
 };
 
@@ -94,6 +95,7 @@ const DESIGN_SUMMARY = {
 const JOB = {
   id: JOB_ID,
   tableId: TABLE_ID,
+  kind: 'design',
   designId: 'dunes',
   mode: 'simulation',
   state: 'drawing',
@@ -156,8 +158,52 @@ describe('AtharApiClient: tables, designs and jobs', () => {
 
     expect(url()).toBe(`${base}/tables/${TABLE_ID}/jobs`);
     expect(init()?.method).toBe('POST');
-    expect(JSON.parse(String(init()?.body))).toStrictEqual({ designId: 'dunes', clientRequestId });
+    // The contract fills in the default kind before sending.
+    expect(JSON.parse(String(init()?.body))).toStrictEqual({
+      kind: 'design',
+      designId: 'dunes',
+      clientRequestId,
+    });
     expect(job.state).toBe('queued');
+  });
+
+  it('starts a freehand path or the rake', async () => {
+    const clientRequestId = '0b8f5f46-3a4d-4c8e-8d3b-6f1d2a9c7e10';
+    const path = [
+      [0, 0.2],
+      [1, 0.5],
+    ] as [number, number][];
+
+    const pen = clientWith({ ...JOB, kind: 'path', designId: null });
+    await pen.client.startJob(TABLE_ID, { kind: 'path', path, clientRequestId });
+    expect(JSON.parse(String(pen.init()?.body))).toStrictEqual({
+      kind: 'path',
+      path,
+      clientRequestId,
+    });
+
+    const rake = clientWith({ ...JOB, kind: 'rake', designId: null });
+    const job = await rake.client.startJob(TABLE_ID, { kind: 'rake', clientRequestId });
+    expect(job.designId).toBeNull();
+  });
+
+  it('lists the ambiences', async () => {
+    const amber = { id: 'amber', name: { en: 'Amber', ar: 'كهرماني' }, color: '#ffbf00' };
+    const { client, url } = clientWith({ ambiences: [amber] });
+
+    await expect(client.listAmbiences()).resolves.toStrictEqual({ ambiences: [amber] });
+    expect(url()).toBe(`${base}/ambiences`);
+  });
+
+  it('sets the ambience with a PUT and returns the table', async () => {
+    const { client, url, init } = clientWith({ ...TABLE, ambienceId: 'amber' });
+
+    const table = await client.setAmbience(TABLE_ID, 'amber');
+
+    expect(url()).toBe(`${base}/tables/${TABLE_ID}/ambience`);
+    expect(init()?.method).toBe('PUT');
+    expect(JSON.parse(String(init()?.body))).toStrictEqual({ ambienceId: 'amber' });
+    expect(table.ambienceId).toBe('amber');
   });
 
   it('refuses to send a start request that breaks the contract', () => {

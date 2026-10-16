@@ -69,7 +69,8 @@ export class PolarPathBuilder {
       const t = index / steps;
       const px = startX + (x - startX) * t;
       const py = startY + (y - startY) * t;
-      const rho = Math.hypot(px, py);
+      // A line between two points on the rim may round to a hair over 1.
+      const rho = Math.min(1, Math.hypot(px, py));
 
       // At the very centre the angle is undefined: keep the one we had.
       theta = rho < 1e-9 ? theta : nearestAngle(Math.atan2(py, px), theta);

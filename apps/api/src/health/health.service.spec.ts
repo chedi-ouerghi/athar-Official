@@ -124,6 +124,7 @@ describe('HealthService', () => {
       pause: simulator.pause.bind(simulator),
       resume: simulator.resume.bind(simulator),
       stop: simulator.stop.bind(simulator),
+      setAmbience: simulator.setAmbience.bind(simulator),
       subscribe: simulator.subscribe.bind(simulator),
     };
 

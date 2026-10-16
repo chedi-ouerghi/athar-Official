@@ -646,7 +646,8 @@ so far. It gets this from `previewPath`, not from the trajectory:
 | ------------ | ----------------------------------------------------------------- | --------------------------------------------- |
 | `id`         | string (UUID)                                                     | Server-generated                              |
 | `tableId`    | string                                                            |                                               |
-| `designId`   | string                                                            |                                               |
+| `kind`       | `'design' \| 'path' \| 'rake'`                                    | What it draws (Phase 5)                       |
+| `designId`   | string \| null                                                    | The catalogue design; `null` for path or rake |
 | `mode`       | `'simulation' \| 'hardware'`                                      | Copied from the driver at creation; immutable |
 | `state`      | `queued \| drawing \| paused \| completed \| failed \| cancelled` | See section 4                                 |
 | `progress`   | number, 0..1                                                      | Never decreases; `1` if and only if completed |
@@ -729,11 +730,13 @@ when the table is lost, so a job cannot hold a table forever.
 (UUID v4, created when the user opens the design screen and reused on retry).
 The API keeps `(tableId, clientRequestId) -> jobId` for the retained history.
 
-- Same pair and same `designId`: **no new job.** The original job is returned
+- Same pair and the same request (same kind and design, or the same path point
+  for point, compared by a SHA-256 of the parsed path, stored with the job):
+  **no new job.** The original job is returned
   with `200` instead of `201`. This is checked **before** the busy check, so a
   double tap that arrives after the first job started returns that job, not
   `TABLE_BUSY`.
-- Same `clientRequestId` with a different `designId`: `IDEMPOTENCY_CONFLICT`
+- Same `clientRequestId` with a different request: `IDEMPOTENCY_CONFLICT`
   (409).
 - A new `clientRequestId` while the table is busy: `TABLE_BUSY`.
 
@@ -853,6 +856,7 @@ type Table = {
   plan: 'basic' | 'personalized';
   voiceAssistant: boolean;
   features: Feature[];
+  ambienceId: string | null; // from the driver; null until one is set
   readiness: { paired: boolean; online: boolean; free: boolean; canStart: boolean };
 };
 
@@ -875,7 +879,8 @@ type DesignDetail = DesignSummary & {
 type DrawingJob = {
   id: string;
   tableId: string;
-  designId: string;
+  kind: 'design' | 'path' | 'rake';
+  designId: string | null; // null for a path or the rake
   mode: 'simulation' | 'hardware';
   state: 'queued' | 'drawing' | 'paused' | 'completed' | 'failed' | 'cancelled';
   progress: number;
@@ -1529,9 +1534,9 @@ paired with this session, online and free, and its plan includes the feature.
   before the driver call, so check-then-start cannot race: owner
   (`TABLE_NOT_FOUND`), design, idempotent replay, enabled (`TABLE_DISABLED`),
   paired (`PAIRING_REQUIRED`), online (`TABLE_OFFLINE`), free (`TABLE_BUSY`),
-  feature in `featuresFor(table)` (`FEATURE_NOT_IN_PLAN`; a design start needs
-  `catalogue`, which every plan has, so today it never fails: the
-  `FEATURE_FOR_START` map is where Phase 5 adds the pen and ambiences). A replay
+  feature in `featuresFor(table)` (`FEATURE_NOT_IN_PLAN`, from the
+  `FEATURE_FOR_START` map: design `catalogue`, path `drawingPen`, rake `rake`).
+  A replay
   returns the original job without checking the conditions again. Pause and
   resume need ownership (in the controller) and a pairing (in the service); stop,
   the safety action, needs ownership only. A successful command extends an
@@ -1544,6 +1549,44 @@ paired with this session, online and free, and its plan includes the feature.
   table) before any real driver is enabled.
 - The mobile app does not pair yet (Phase 6), so until then it cannot start or
   command a job against this API; the HTTP tests pair explicitly.
+
+### Rake, freehand path and LED ambiences
+
+Phase 5. What the website promises and the `personalized` plan sells.
+
+- **Start kinds.** `POST /tables/:tableId/jobs` takes `kind: 'design' | 'path' | 'rake'`
+  (`design` by default). Each is a normal job through the same state machine,
+  driver call and conditions; there is no "raking" state. `DesignsService`
+  hands `JobsService` a `DrawingPlan` (`{trajectory, estimatedDurationSeconds}`)
+  for each kind, and the duration always comes from `estimateDurationSeconds`,
+  the nominal-speed rule the designs use.
+- **Rake.** `designs/generators/rake.ts`, a pure generator like the designs: an
+  Archimedean spiral from the centre out to rho 0.96 in 20 turns, then straight
+  back to home (`HOME_RHO = 0`), about 17 minutes at the nominal speed. It passes
+  `trajectoryProblems` (the catalogue's checks: within 0..1, starts and ends at
+  home, no step over 0.05, no bowed segment) when `designs.service.ts` loads, so
+  a broken rake stops the process. It is not in the catalogue, whose "exactly 4"
+  rule is unchanged. The pitch is a placeholder for the ball's track width.
+- **Freehand path** (`designs/freehand.ts`). The app sends at most 1000 points;
+  the API joins them with straight lines sampled every 0.01 radii (so no rule
+  is relaxed: finger input with far-apart points is densified, not waved
+  through), prefixes a line from home and appends a return home, then runs the
+  same `trajectoryProblems`. A line passing within 0.02 radii of the centre is
+  drawn through the centre, turning on the spot there, because near the centre
+  the polar interpolation would bow it. Longer than 120 radii (about 33 min), or
+  failing a check: `VALIDATION_FAILED`, decided after the plan check.
+- **LED ambiences.** Data in `designs/data/ambiences.v1.ts`: only the three the
+  website names (Gulf blue, amber, pearl), with Arabic names that need native
+  review. The owner supplies the rest; none are invented. `GET /api/v1/ambiences`
+  lists them. `PUT /api/v1/tables/:tableId/ambience` checks ownership, enabled,
+  pairing, online and `ledAmbiences` (in `TablesService.setAmbience`), then calls
+  `TableDriver.setAmbience`. `DriverStatus.ambienceId` and `Table.ambienceId`
+  report it. It may change while a drawing runs: light and sand are independent,
+  and the simulator keeps drawing.
+- **Voice assistant.** In simulation it is the `voiceAssistant` flag and the
+  `voiceAssistant` feature only; nothing speaks. The hardware driver will own
+  greetings and voice interaction on the table itself, behind `TableDriver`, so
+  nothing above the driver changes when it arrives.
 
 ### The QR code, restated
 
