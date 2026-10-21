@@ -19,7 +19,7 @@ export interface AppConfig {
   readonly port: number;
   readonly logLevel: Environment['LOG_LEVEL'];
   readonly shutdownTimeoutMs: number;
-  /** Which table driver is bound; `hardware` cannot start yet. */
+  /** Which table driver is bound: the simulator, or the MQTT driver for `hardware`. */
   readonly tableMode: Environment['TABLE_MODE'];
   /** Simulator: divisor applied to simulated durations. */
   readonly simulationSpeedFactor: number;
@@ -27,6 +27,12 @@ export interface AppConfig {
   readonly simulationFaultEveryNthJob: number;
   /** Simulator: progress at which an injected fault occurs. */
   readonly simulationFaultAtProgress: number;
+  /** Hardware mode: the broker the tables connect to, and the API's login on it. */
+  readonly mqtt: {
+    readonly url: string;
+    readonly username: string | undefined;
+    readonly password: string | undefined;
+  };
   /** Drawing jobs kept per table. */
   readonly jobHistoryLimit: number;
   /** Absolute path of the JSON file that stores registered tables. */
@@ -35,6 +41,8 @@ export interface AppConfig {
   readonly accountsDataFile: string;
   /** Absolute path of the JSON file that stores sessions. */
   readonly sessionsDataFile: string;
+  /** Absolute path of the JSON file that stores claim and share tokens and guests. */
+  readonly tableAccessDataFile: string;
   /** Express `trust proxy`: hop count or proxy addresses; undefined trusts none. */
   readonly trustProxy: number | string[] | undefined;
   /** Origin for QR links, without a trailing slash; undefined in development. */
@@ -63,10 +71,16 @@ export function createAppConfig(environment: Environment, serviceVersion: string
     simulationSpeedFactor: environment.SIMULATION_SPEED_FACTOR,
     simulationFaultEveryNthJob: environment.SIMULATION_FAULT_EVERY_NTH_JOB,
     simulationFaultAtProgress: environment.SIMULATION_FAULT_AT_PROGRESS,
+    mqtt: {
+      url: environment.MQTT_URL,
+      username: environment.MQTT_USERNAME,
+      password: environment.MQTT_PASSWORD,
+    },
     jobHistoryLimit: environment.JOB_HISTORY_LIMIT,
     tablesDataFile: resolve(environment.TABLES_DATA_FILE),
     accountsDataFile: resolve(environment.ACCOUNTS_DATA_FILE),
     sessionsDataFile: resolve(environment.SESSIONS_DATA_FILE),
+    tableAccessDataFile: resolve(environment.TABLE_ACCESS_DATA_FILE),
     trustProxy:
       environment.TRUST_PROXY === undefined ? undefined : parseTrustProxy(environment.TRUST_PROXY),
     publicLinkBaseUrl: environment.PUBLIC_LINK_BASE_URL,

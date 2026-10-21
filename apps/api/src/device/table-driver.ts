@@ -3,9 +3,9 @@
  *
  * The interface is expressed in domain terms. It names no serial port, broker,
  * controller firmware, G-code dialect or transport, so it cannot only be
- * implemented for one of them. `SimulatedTableDriver` implements it now; a
- * future `HardwareTableDriver` will implement the same interface, and nothing
- * above the driver changes when it arrives.
+ * implemented for one of them. `SimulatedTableDriver` implements it for
+ * development and `MqttTableDriver` for real tables; nothing above the driver
+ * changes with the mode.
  *
  * The command path is: phone -> backend (over the internet) -> table
  * controller. This interface is the backend's side of the last arrow, and the
@@ -19,6 +19,7 @@ import type {
   DriverErrorCode,
   DriverPhase,
   DriverStatus,
+  Light,
   TableMode,
 } from '@athar/contracts';
 import type { Trajectory } from './trajectory.js';
@@ -101,6 +102,12 @@ export interface TableDriver {
    * Rejects with `DriverError` (`OFFLINE`, `FAULT`) when the table cannot take it.
    */
   setAmbience(tableId: string, ambienceId: string): Promise<void>;
+
+  /**
+   * Set the light: off, on, any colour at a brightness, or a named ambience.
+   * Same rules as {@link setAmbience}, which is `setLight` with a `preset`.
+   */
+  setLight(tableId: string, light: Light): Promise<void>;
 
   /**
    * Receive every status change and progress update for one table, in order.

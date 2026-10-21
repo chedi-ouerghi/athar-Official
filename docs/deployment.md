@@ -42,11 +42,14 @@ Validated once at start; the process refuses to start and lists every problem **
 | `PORT`                           | what the host assigns               | Most hosts inject it. Default `3000`                                                                                                                                              |
 | `HOST`                           | `0.0.0.0` (default)                 | Must be reachable by the host's router                                                                                                                                            |
 | `ACCOUNTS_DATA_FILE`             | a path **on persistent storage**    | Accounts (password hashes). Same rules as `TABLES_DATA_FILE`. Create the first admin with `admin:create` on the host, before the first start                                      |
+| `TABLE_ACCESS_DATA_FILE`         | a path **on persistent storage**    | Claim and share token hashes, and guests. Same rules as `TABLES_DATA_FILE`; losing it invalidates printed claim codes                                                             |
 | `SESSIONS_DATA_FILE`             | a path **on persistent storage**    | Sessions (token hashes). Same rules as `TABLES_DATA_FILE`                                                                                                                         |
 | `TRUST_PROXY`                    | `1` behind one reverse proxy        | Behind Caddy, or a host's single load balancer, set `TRUST_PROXY=1` so the sign-in limit sees client IPs, not the proxy's (check the host's hop count). Leave unset with no proxy |
 | `PUBLIC_LINK_BASE_URL`           | **required**, `https://<link host>` | Origin only (no path). It is baked into every printed QR code, so it must outlive the products (decision 3)                                                                       |
 | `TABLES_DATA_FILE`               | a path **on persistent storage**    | Default `./data/tables.json` is relative to the working directory and is lost on an ephemeral disk                                                                                |
-| `TABLE_MODE`                     | `simulation`                        | `hardware` refuses to start until a hardware driver exists                                                                                                                        |
+| `TABLE_MODE`                     | `simulation`                        | `hardware` uses the MQTT driver (see the MQTT variables below)                                                                                                                    |
+| `MQTT_URL`                       | `mqtts://<broker host>:8883`        | Hardware only. Required to be `mqtts://` or `wss://` in production                                                                                                                |
+| `MQTT_USERNAME`, `MQTT_PASSWORD` | the API's login on the broker       | Hardware only. Both required in production                                                                                                                                        |
 | `LOG_LEVEL`                      | `info`                              |                                                                                                                                                                                   |
 | `SHUTDOWN_TIMEOUT_MS`            | `10000` (default)                   | Keep it below the host's own kill timeout                                                                                                                                         |
 | `JOB_HISTORY_LIMIT`              | `20` (default)                      | Jobs kept per table, in memory                                                                                                                                                    |
@@ -84,6 +87,26 @@ Validated once at start; the process refuses to start and lists every problem **
   The answer's `link` (`https://<link host>/t/<id>`) is what the printed code holds; render
   it with `pnpm --filter @athar/api table:qr <id>` on a machine that has the table file
   (or encode the link with any QR tool at error-correction level Q).
+
+### Hardware mode (MQTT)
+
+With `TABLE_MODE=hardware` the API drives real tables through an MQTT broker
+(Mosquitto) that you run next to it; see
+[architecture.md](architecture.md#mqtttabledriver) for the protocol.
+
+- The API starts even if the broker is unreachable; every table then reads
+  `offline` and commands fail with `TABLE_OFFLINE` until it comes back.
+- Run the broker with TLS (`mqtts://`, port 8883), anonymous access off, and an
+  ACL: each table's login may read only `athar/v1/t/<its id>/cmd` and write only
+  its own `ack`, `status` and `presence`; the API's login may read every table's
+  `ack`, `status` and `presence` and write every `cmd`. Never expose a port on a
+  venue's network: tables connect out.
+- A command is never queued: if a table is not known to be online, it is refused
+  at once rather than held and sent later. A table that does not acknowledge a
+  command within 5 seconds is reported offline.
+- The broker credentials in `provisionTableResponse` are placeholders until the
+  broker's Dynamic Security plugin is wired in: they are generated but not yet
+  registered on the broker.
 
 ### Probes
 

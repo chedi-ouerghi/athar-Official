@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { AccountRole, SessionResponse } from '@athar/contracts';
+import { TableAccessRepository } from '../src/access/access.repository.js';
 import type { AppModuleOptions } from '../src/app.module.js';
 import { AccountRepository } from '../src/auth/account.repository.js';
 import { AccountsService } from '../src/auth/accounts.service.js';
@@ -33,6 +34,7 @@ export function createTestApp(
     repository: options.repository ?? new InMemoryTableRepository(fixtureTables()),
     accounts: options.accounts ?? AccountRepository.inMemory(),
     sessions: options.sessions ?? SessionRepository.inMemory(),
+    access: options.access ?? TableAccessRepository.inMemory(),
   });
 }
 

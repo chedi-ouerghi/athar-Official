@@ -14,6 +14,7 @@ import { AppModule } from './app.module.js';
 import type { AppConfig } from './config/app-config.js';
 import { AccountRepository } from './auth/account.repository.js';
 import { SessionRepository } from './auth/session.repository.js';
+import { TableAccessRepository } from './access/access.repository.js';
 import { JsonFileTableRepository } from './tables/json-file-table.repository.js';
 import type { AppModuleOptions } from './app.module.js';
 
@@ -113,6 +114,8 @@ export async function createConfiguredApp(
         overrides.repository ?? (await own(JsonFileTableRepository.open(config.tablesDataFile))),
       accounts: overrides.accounts ?? (await own(AccountRepository.open(config.accountsDataFile))),
       sessions: overrides.sessions ?? (await own(SessionRepository.open(config.sessionsDataFile))),
+      access:
+        overrides.access ?? (await own(TableAccessRepository.open(config.tableAccessDataFile))),
     });
   } catch (error) {
     // The application never came up, so nothing else will release the file locks.

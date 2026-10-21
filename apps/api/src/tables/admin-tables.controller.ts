@@ -1,16 +1,22 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   createTableRequestSchema,
+  provisionTableRequestSchema,
   tableParamsSchema,
   updateTableRequestSchema,
   type AdminTable,
+  type ClaimTokenResponse,
   type ListAdminTablesResponse,
+  type ProvisionTableResponse,
   type TableParams,
   type TableQrResponse,
   type UpdateTableRequest,
 } from '@athar/contracts';
 import type { z } from 'zod';
+import { AccessService } from '../access/access.service.js';
+import { newMqttCredentials } from '../access/mqtt-credentials.js';
 import { CustomersService } from '../auth/customers.service.js';
+import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { SessionGuard, Roles } from '../auth/session.guard.js';
 import { DomainException } from '../common/http/domain.exception.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
@@ -30,7 +36,39 @@ export class AdminTablesController {
   constructor(
     private readonly registry: TableRegistry,
     private readonly customers: CustomersService,
+    private readonly access: AccessService,
+    @Inject(APP_CONFIG) private readonly config: Pick<AppConfig, 'mqtt'>,
   ) {}
+
+  /**
+   * Register a table nobody owns yet, in one step: the table, the broker login
+   * for its controller, and the claim code its customer scans. The login and the
+   * code are shown here once; the server keeps only the code's hash.
+   */
+  @Post('provision')
+  async provision(
+    @Body(new ZodValidationPipe(provisionTableRequestSchema))
+    body: z.output<typeof provisionTableRequestSchema>,
+  ): Promise<ProvisionTableResponse> {
+    const table = await this.registry.create(body);
+
+    return {
+      table,
+      mqtt: newMqttCredentials(table.id, this.config.mqtt.url),
+      pairing: await this.access.issueClaim(table.id),
+    };
+  }
+
+  /**
+   * A new claim code for a table nobody owns yet, for a printed code that expired
+   * in stock. The earlier code stops working.
+   */
+  @Post(':tableId/claim-token')
+  async claimToken(
+    @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
+  ): Promise<ClaimTokenResponse> {
+    return { tableId: params.tableId, pairing: await this.access.issueClaim(params.tableId) };
+  }
 
   /** Register a table. The server generates the id; the caller cannot choose it. */
   @Post()

@@ -32,6 +32,7 @@
  */
 
 import { Logger } from '@nestjs/common';
+import type { Light } from '@athar/contracts';
 import type { Cancel, Clock, Scheduler } from './clock.js';
 import {
   DriverError,
@@ -232,8 +233,15 @@ export class SimulatedTableDriver implements TableDriver {
     });
   }
 
-  /** Stored and announced; a drawing in progress carries on. */
   setAmbience(tableId: string, ambienceId: string): Promise<void> {
+    return this.setLight(tableId, { mode: 'preset', ambienceId });
+  }
+
+  /**
+   * Stored and announced; a drawing in progress carries on. The simulator keeps
+   * only the named ambience a status can report: any other light reads as none.
+   */
+  setLight(tableId: string, light: Light): Promise<void> {
     return this.run(() => {
       const state = this.stateOf(tableId);
       this.settle(tableId, state);
@@ -245,7 +253,7 @@ export class SimulatedTableDriver implements TableDriver {
         );
       }
 
-      state.ambienceId = ambienceId;
+      state.ambienceId = light.mode === 'preset' ? light.ambienceId : null;
       this.announce(tableId, state, true);
     });
   }

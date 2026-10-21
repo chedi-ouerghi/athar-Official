@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { featuresFor, type Table } from '@athar/contracts';
+import { featuresFor, type Light, type Table } from '@athar/contracts';
 import type { Authenticated } from '../auth/auth.service.js';
 import { DomainException } from '../common/http/domain.exception.js';
 import { AMBIENCES_V1 } from '../designs/data/ambiences.v1.js';
@@ -48,9 +48,25 @@ export class TablesService {
    * @throws DomainException `VALIDATION_FAILED`, `TABLE_NOT_FOUND`,
    *   `TABLE_DISABLED`, `PAIRING_REQUIRED`, `TABLE_OFFLINE`, `FEATURE_NOT_IN_PLAN`
    */
-  async setAmbience(tableId: string, ambienceId: string, caller: Authenticated): Promise<Table> {
-    if (!AMBIENCES_V1.some((ambience) => ambience.id === ambienceId)) {
-      throw new DomainException('VALIDATION_FAILED', `No ambience with id ${ambienceId}.`);
+  setAmbience(tableId: string, ambienceId: string, caller: Authenticated): Promise<Table> {
+    return this.setLight(tableId, { mode: 'preset', ambienceId }, caller);
+  }
+
+  /**
+   * Set the light of the table the caller may command (its owner, or a guest): off,
+   * on, a colour, or a named ambience. Same checks, in the same order, as
+   * {@link setAmbience}, which is this with a `preset`; the plan must include
+   * `ledAmbiences` for any of it.
+   *
+   * @throws DomainException `VALIDATION_FAILED`, `TABLE_NOT_FOUND`,
+   *   `TABLE_DISABLED`, `PAIRING_REQUIRED`, `TABLE_OFFLINE`, `FEATURE_NOT_IN_PLAN`
+   */
+  async setLight(tableId: string, light: Light, caller: Authenticated): Promise<Table> {
+    if (
+      light.mode === 'preset' &&
+      !AMBIENCES_V1.some((ambience) => ambience.id === light.ambienceId)
+    ) {
+      throw new DomainException('VALIDATION_FAILED', `No ambience with id ${light.ambienceId}.`);
     }
 
     const record = await this.registry.getFor(tableId, caller.account, 'command');
@@ -80,7 +96,7 @@ export class TablesService {
     }
 
     try {
-      await this.driver.setAmbience(tableId, ambienceId);
+      await this.driver.setLight(tableId, light);
     } catch (error) {
       // The table dropped off between the check and the command.
       if (error instanceof DriverError) {

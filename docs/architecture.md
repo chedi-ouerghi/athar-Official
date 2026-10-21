@@ -212,11 +212,11 @@ flowchart LR
     Jobs --> Driver{{"TableDriver (interface)"}}
     Tables --> Driver
     Sim["SimulatedTableDriver"] -. implements .-> Driver
-    Hw["HardwareTableDriver (future, not built)"] -. "will implement" .-> Driver
+    Hw["MqttTableDriver"] -. implements .-> Driver
   end
 
-  Hw -. "network (future)" .-> Gw["gateway process (future)"]
-  Gw -. "network (future)" .-> Ctl["controller on the table (future)"]
+  Hw -- "MQTT, QoS 1" --> Broker["MQTT broker (Mosquitto)"]
+  Broker -- "MQTT, tables connect out" --- Ctl["controller on the table (Raspberry Pi)"]
 
   Contracts["packages/contracts"] -.-> Mobile
   Contracts -.-> Api
@@ -260,28 +260,22 @@ TABLE_MODE: z.enum(['simulation', 'hardware']).default('simulation'),
 
 - `simulation` (default): `SimulatedTableDriver` is bound to the `TableDriver`
   token.
-- `hardware`: **the process refuses to start** with a dedicated, readable error
-  until a hardware driver exists:
+- `hardware`: `MqttTableDriver` is bound. It reaches the real tables through an
+  MQTT broker (Mosquitto), configured by `MQTT_URL`, `MQTT_USERNAME` and
+  `MQTT_PASSWORD`; see [`MqttTableDriver`](#mqtttabledriver). The API **starts
+  even if the broker is down**: the client keeps retrying, and every table reads
+  as `offline` until the broker and the table's own presence have been heard. In
+  production the configuration must use `mqtts://` (or `wss://`) with a login.
 
-  ```
-  TABLE_MODE=hardware is not available: no hardware table driver is installed in this build.
-  Set TABLE_MODE=simulation.
-  ```
-
-  The check lives in the driver factory (`createTableDriver(config)`), which runs
-  while the module graph is created, before the server binds a port. It throws a
-  `StartupConfigurationError`; `main.ts` prints its message verbatim, the way it
-  already prints `EnvironmentValidationError`, instead of the generic "Failed to
-  start the API." with a stack trace.
-
+- The choice is made in the driver factory (`createTableDriver(config)`), which
+  runs while the module graph is created, before the server binds a port.
 - The resolved mode is part of `AppConfig`; nothing else decides the mode, and
   no client can influence it.
 
-`HardwareTableDriver` is **described, not created**, in this milestone. It will
-implement the same `TableDriver` interface, own the transport to the real
-controller, and be selected by the same factory. Its arrival must require no
-change to `tables`, `designs`, `drawing-jobs`, the controllers, the contracts or
-the mobile app. If it does, the interface was wrong: fix the interface first.
+`MqttTableDriver` implements the same `TableDriver` interface and is selected by
+the same factory. Its arrival required no change to `tables`, `designs`,
+`drawing-jobs`, the controllers or the mobile app. If a driver ever does, the
+interface was wrong: fix the interface first.
 
 ## 2. `TableDriver` interface
 
@@ -309,9 +303,9 @@ phone  ──HTTPS over the internet──▶  backend  ──▶  table control
 - The **driver forwards the command to the table's controller**. In this
   milestone there is no controller: `SimulatedTableDriver` sits in its place and
   answers exactly as a controller would through the interface, so everything
-  above the driver is the production code path. A future `HardwareTableDriver`
-  replaces the simulator and forwards to the real controller over the network
-  (below); nothing above the driver changes.
+  above the driver is the production code path. With `TABLE_MODE=hardware`,
+  `MqttTableDriver` replaces the simulator and forwards to the real controller
+  through the broker (below); nothing above the driver changes.
 - Status flows back the same way: controller (or simulator) → driver →
   `drawing-jobs` → the job the phone polls.
 
@@ -454,7 +448,7 @@ Rules for every implementation:
   app treats `404` for a known job id as a normal state
   ([section 7](#7-mobile-app-structure)).
 
-### `HardwareTableDriver` (future; description only)
+### `MqttTableDriver`
 
 Decided: **the table connects to the backend over the network, and the phone
 never talks to the table directly.** The reasons are that tables sit in public
@@ -462,17 +456,47 @@ venues and play unattended, and that routing everything through the backend
 keeps access control and job rules in one place
 ([future-infrastructure-decisions.md](future-infrastructure-decisions.md)).
 
-`HardwareTableDriver` therefore lives on the **backend side**, behind this
-interface. It will talk to a controller on the table over the network, most
-likely through a separate gateway process that holds the long-lived
-connections, so they stay away from request handling. In terms of the diagram in
-[section 1](#1-components-and-boundaries): the driver is a client of the
-gateway, and the gateway is the peer of the table's controller.
+`MqttTableDriver` (`apps/api/src/device/hardware/`) lives on the **backend
+side**, behind this interface. The Raspberry Pi on each table connects out to an
+MQTT broker (Mosquitto), so nothing is exposed on the venue's network; the
+broker is the long-lived connection holder, and the API is one more client of
+it. The protocol is its own contract, `device-protocol.ts` in `@athar/contracts`
+(versioned by a `v` field), separate from the HTTP API. Topics, all under
+`athar/v1/t/{tableId}/`:
 
-What is still open ([Open decisions](#9-open-decisions)): the controller
-hardware and the transport between gateway and controller; the interface above
-deliberately names neither. Device framing remains a separate contract from the
-HTTP API. Until the driver exists, `TABLE_MODE=hardware` cannot start.
+| Topic      | Direction    | Content                                                          |
+| ---------- | ------------ | ---------------------------------------------------------------- |
+| `cmd`      | API -> table | `start`, `pause`, `resume`, `stop`, `light`; QoS 1, not retained |
+| `ack`      | table -> API | Accepted or refused, by `cmdId`; QoS 1                           |
+| `status`   | table -> API | A `DriverStatus` snapshot, retained                              |
+| `presence` | table -> API | Plain text `online` / `offline`, retained; `offline` is the LWT  |
+
+How it behaves:
+
+- **A command resolves on its `ack`, not on completion.** Each command carries a
+  `cmdId`; the promise settles when an `ack` with that id arrives from the same
+  table. A drawing takes minutes and is followed through `status`, so no HTTP
+  request stays open for it.
+- **Five seconds without an `ack` is `OFFLINE`** (`DEVICE_ACK_TIMEOUT_MS`). So is
+  a command pending when the table's presence turns `offline` or the broker
+  connection drops, without waiting for the timeout.
+- **No command is queued for later.** A command is refused with `OFFLINE`
+  unless the table is known to be online right now, and the broker connection is
+  up. Otherwise the MQTT client would hold a QoS 1 message and send it on
+  reconnection, possibly long after the visitor gave up, and a table would start
+  a drawing nobody is waiting for. Commands are never retained either.
+- **Presence comes from the broker.** A table whose presence has not been heard
+  is treated as offline. When the broker connection is lost, every table is.
+- **The table keeps drawing when the network drops.** Losing presence reports the
+  connection as `offline` but keeps the last phase and progress; the driver does
+  not fail the job. A message from a table is accepted only on that table's own
+  topic and naming that table; unreadable or oversized messages are ignored.
+- The table's own broker login (an ACL limiting it to its own topics) is what
+  keeps one table from speaking for another; the API's login can read all tables.
+
+Still open: a `start` that timed out may nevertheless have been accepted by a
+slow table, so the API's job and the table can disagree until reconciled (a
+persistence-phase concern, with the jobs that survive a restart).
 
 ## 3. Domain model
 
@@ -819,18 +843,21 @@ envelope. Every failure uses the existing error envelope.
 allows within `v1`. The filter must change to honour a `code` carried by domain
 exceptions rather than deriving it from the status alone (gap 3.6).
 
-| Code                   | HTTP | Meaning                                          |
-| ---------------------- | ---- | ------------------------------------------------ |
-| `VALIDATION_FAILED`    | 400  | Existing. Bad body, query or path parameter      |
-| `TABLE_NOT_FOUND`      | 404  | Unknown table id                                 |
-| `DESIGN_NOT_FOUND`     | 404  | Unknown design id                                |
-| `JOB_NOT_FOUND`        | 404  | Unknown job id, including after an API restart   |
-| `TABLE_DISABLED`       | 409  | The table exists but `enabled` is false          |
-| `TABLE_OFFLINE`        | 409  | The driver reports the table offline or in error |
-| `TABLE_BUSY`           | 409  | The table already has an active job              |
-| `INVALID_TRANSITION`   | 409  | Command not allowed in the job's current state   |
-| `IDEMPOTENCY_CONFLICT` | 409  | `clientRequestId` reused with a different design |
-| `UNAUTHORIZED`         | 401  | No session, or an unknown access token           |
+| Code                    | HTTP | Meaning                                                                               |
+| ----------------------- | ---- | ------------------------------------------------------------------------------------- |
+| `VALIDATION_FAILED`     | 400  | Existing. Bad body, query or path parameter                                           |
+| `TABLE_NOT_FOUND`       | 404  | Unknown table id                                                                      |
+| `DESIGN_NOT_FOUND`      | 404  | Unknown design id                                                                     |
+| `JOB_NOT_FOUND`         | 404  | Unknown job id, including after an API restart                                        |
+| `TABLE_DISABLED`        | 409  | The table exists but `enabled` is false                                               |
+| `TABLE_OFFLINE`         | 409  | The driver reports the table offline or in error                                      |
+| `TABLE_BUSY`            | 409  | The table already has an active job                                                   |
+| `INVALID_TRANSITION`    | 409  | Command not allowed in the job's current state                                        |
+| `IDEMPOTENCY_CONFLICT`  | 409  | `clientRequestId` reused with a different design                                      |
+| `UNAUTHORIZED`          | 401  | No session, or an unknown access token                                                |
+| `PAIRING_TOKEN_INVALID` | 400  | A claim or share code that is unknown, expired, used up, revoked or for another table |
+| `TABLE_ALREADY_CLAIMED` | 409  | A claim code for a table that already has an owner                                    |
+| `DESIGN_READ_ONLY`      | 403  | Deleting a catalogue design (reserved; custom designs are not built yet)              |
 
 Since Phase 3 every endpoint in this section needs a session, so each can also
 answer `UNAUTHORIZED` or `SESSION_EXPIRED`; see
@@ -1061,12 +1088,12 @@ tables, are different: they require an admin session; see
 [Table provisioning](#table-provisioning-admin). That protects who can
 _register_ tables, not who can _use_ one.) What limits the damage:
 
-1. **Every table is simulated.** `TABLE_MODE=hardware` cannot start, so no
-   request can move a physical table. The worst case is a stranger starting,
-   pausing or stopping a _simulated_ job, including **another visitor's** (job
-   commands carry no ownership): a nuisance, not a safety issue. This must be
-   solved together with access control (open decision 2), and before any
-   hardware driver, where it would interrupt a real drawing.
+1. **In simulation mode no request can move a physical table.** The worst case
+   is a stranger starting, pausing or stopping a _simulated_ job, including
+   **another visitor's** (job commands carry no ownership): a nuisance, not a
+   safety issue. With `TABLE_MODE=hardware` (`MqttTableDriver`) a request can
+   move a real table, so access control (open decision 2) must be in place
+   before that mode is used.
 2. The one-active-job rule and the strict state machine bound what anyone can
    do to a table.
 3. The `mode` field and the Simulation badge mean a simulated job is never shown
@@ -1341,20 +1368,23 @@ and `createAppConfig`, listed in `apps/api/.env.example` and in
 [environment-configuration.md](environment-configuration.md). Nothing reads
 `process.env` outside `src/config`.
 
-| Variable                         | Type         | Default                | Example                        | Purpose                                                                                                                                                     |
-| -------------------------------- | ------------ | ---------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TABLE_MODE`                     | enum         | `simulation`           | `simulation`                   | `simulation` or `hardware`; `hardware` fails startup for now                                                                                                |
-| `TABLES_DATA_FILE`               | path         | `./data/tables.json`   | `/var/lib/athar/tables.json`   | JSON file holding registered tables; created if missing. Must be on persistent storage                                                                      |
-| `ACCOUNTS_DATA_FILE`             | path         | `./data/accounts.json` | `/var/lib/athar/accounts.json` | JSON file holding accounts (password hashes only). Persistent storage                                                                                       |
-| `SESSIONS_DATA_FILE`             | path         | `./data/sessions.json` | `/var/lib/athar/sessions.json` | JSON file holding sessions (token hashes only). Persistent storage                                                                                          |
-| `PUBLIC_LINK_BASE_URL`           | URL          | _(unset)_              | `https://app.athar.example`    | Origin used to build the QR link `<base>/t/<tableId>`. Required in production, must be `https` there. Unset in development: links use `athar://t/<tableId>` |
-| `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`                    | `10`                           | Divides simulated durations; large values for tests and demos                                                                                               |
-| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`                    | `3`                            | Every Nth job faults; `0` disables injected faults                                                                                                          |
-| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`                  | `0.5`                          | Progress at which an injected fault occurs                                                                                                                  |
-| `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`                   | `20`                           | Jobs retained per table                                                                                                                                     |
+| Variable                         | Type         | Default                    | Example                            | Purpose                                                                                                                                                     |
+| -------------------------------- | ------------ | -------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TABLE_MODE`                     | enum         | `simulation`               | `simulation`                       | `simulation` or `hardware` (MQTT driver; see `MQTT_URL`)                                                                                                    |
+| `TABLES_DATA_FILE`               | path         | `./data/tables.json`       | `/var/lib/athar/tables.json`       | JSON file holding registered tables; created if missing. Must be on persistent storage                                                                      |
+| `ACCOUNTS_DATA_FILE`             | path         | `./data/accounts.json`     | `/var/lib/athar/accounts.json`     | JSON file holding accounts (password hashes only). Persistent storage                                                                                       |
+| `TABLE_ACCESS_DATA_FILE`         | path         | `./data/table-access.json` | `/var/lib/athar/table-access.json` | JSON file holding claim and share token hashes and guests. Persistent storage                                                                               |
+| `SESSIONS_DATA_FILE`             | path         | `./data/sessions.json`     | `/var/lib/athar/sessions.json`     | JSON file holding sessions (token hashes only). Persistent storage                                                                                          |
+| `PUBLIC_LINK_BASE_URL`           | URL          | _(unset)_                  | `https://app.athar.example`        | Origin used to build the QR link `<base>/t/<tableId>`. Required in production, must be `https` there. Unset in development: links use `athar://t/<tableId>` |
+| `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`                        | `10`                               | Divides simulated durations; large values for tests and demos                                                                                               |
+| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`                        | `3`                                | Every Nth job faults; `0` disables injected faults                                                                                                          |
+| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`                      | `0.5`                              | Progress at which an injected fault occurs                                                                                                                  |
+| `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`                       | `20`                               | Jobs retained per table                                                                                                                                     |
 
-The `SIMULATION_*` variables have no effect when `TABLE_MODE=hardware`, which
-cannot start in this milestone anyway.
+The `SIMULATION_*` variables have no effect when `TABLE_MODE=hardware`.
+`MQTT_URL` (default `mqtt://localhost:1883`), `MQTT_USERNAME` and `MQTT_PASSWORD`
+are read only in that mode; in production it requires `mqtts://` or `wss://` and
+both credentials.
 
 Mobile variables are all `EXPO_PUBLIC_*`, therefore public, and depend on the
 inlining fix in gap 3.2. Add them to `apps/mobile/.env.example` and to
@@ -1744,6 +1774,50 @@ named by `TABLES_DATA_FILE`.
 - `InMemoryTableRepository` (seeded from test fixtures) implements the same
   interface, so every test runs against the real services without touching disk,
   and one shared test suite runs against both implementations.
+
+## Claiming and sharing a table
+
+A table is **provisioned** by an admin, **claimed** by the customer it is sold to,
+and then **shared** by that owner with guests. All three go through one-time or
+limited tokens; the code is in `apps/api/src/access/`.
+
+| Step      | Endpoint                                         | Who      | Result                                                                            |
+| --------- | ------------------------------------------------ | -------- | --------------------------------------------------------------------------------- |
+| Provision | `POST /api/v1/admin/tables/provision`            | admin    | An unowned table, the broker login for its controller, and a claim link (30 days) |
+| Re-issue  | `POST /api/v1/admin/tables/:tableId/claim-token` | admin    | A new claim link for a table still unowned; the old one stops working             |
+| Claim     | `POST /api/v1/tables/pair`                       | customer | The customer becomes the owner; the token is spent                                |
+| Share     | `POST /api/v1/tables/:tableId/shares`            | owner    | A link (1 h to 7 days, 1 to 10 uses) that makes a guest                           |
+| Join      | `POST /api/v1/tables/pair`                       | customer | The customer becomes a guest until the link expires                               |
+
+- **What a QR code holds.** `<origin>/pair?tableId=..&token=..` on
+  `PUBLIC_LINK_BASE_URL` (or `athar://pair?...`, which the app also accepts and which
+  is the only form in development). It never holds a broker credential. The
+  table's own link, `/t/<id>`, still holds nothing but the id.
+- **Tokens** are 256 random bits, shown once. Only their SHA-256 is stored, in
+  `TABLE_ACCESS_DATA_FILE` together with the guests. Redeeming a token checks it
+  and spends a use in one serialized step, so a single-use token is won by exactly
+  one of any number of simultaneous requests. Unknown, expired, used-up, revoked or
+  for-another-table all answer `PAIRING_TOKEN_INVALID`, so a caller cannot tell
+  which tokens exist. Tokens are not logged.
+- **The owner stays in the table record** (`ownerAccountId`); claiming writes it.
+  A valid claim code for a table that already has an owner is
+  `TABLE_ALREADY_CLAIMED` and is not spent. If writing the owner fails, the use is
+  given back.
+- **A guest** may read and command the table (start and stop drawings, set the
+  light) until the end of the link they used; they may not share it. `mayUse` has
+  three uses: `read`, `command`, `manage`. The owner may do all three, a guest the
+  first two, an admin only `read`. Anyone else is told the table does not exist.
+  Revoking a guest before the link ends, and listing guests, are not built yet.
+- **The broker login** returned by provisioning is generated but not registered
+  on the broker (see [deployment.md](deployment.md#hardware-mode-mqtt)).
+- **The light** (`PUT /api/v1/tables/:tableId/light`) takes off, on, a colour with a
+  brightness, or a named ambience, for an owner or a guest of a table whose plan
+  has `ledAmbiences`. The driver reports only a named ambience, so any other light
+  reads as no ambience.
+
+shortcut: claiming writes the token store and then the table file, which are two
+files with no transaction; a failure between them is compensated, not atomic.
+Both move to one database when there is one.
 
 ## 9. Open decisions
 

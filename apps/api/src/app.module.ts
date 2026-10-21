@@ -11,8 +11,10 @@ import type { Scheduler } from './device/clock.js';
 import { systemClock } from './device/clock.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { DeviceModule } from './device/device.module.js';
+import type { MqttClientLike } from './device/hardware/mqtt-table-driver.js';
 import { TablesModule, type TablesModuleOptions } from './tables/tables.module.js';
 import { AuthModule, type AuthModuleOptions } from './auth/auth.module.js';
+import { AccessModule, type AccessModuleOptions } from './access/access.module.js';
 
 /**
  * Application composition root.
@@ -29,9 +31,12 @@ import { AuthModule, type AuthModuleOptions } from './auth/auth.module.js';
  * by the driver, the tables, the jobs and the sessions, so they always agree on
  * the time.
  */
-export interface AppModuleOptions extends TablesModuleOptions, AuthModuleOptions {
+export interface AppModuleOptions
+  extends TablesModuleOptions, AuthModuleOptions, AccessModuleOptions {
   /** Drives the simulator's ticks. Defaults to real timers. */
   readonly scheduler?: Scheduler;
+  /** Hardware mode: replaces the broker connection, so tests need no broker. */
+  readonly mqttClient?: MqttClientLike;
 }
 
 @Module({})
@@ -47,9 +52,11 @@ export class AppModule {
         DeviceModule.forRoot(config, {
           clock,
           ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
+          ...(options.mqttClient === undefined ? {} : { mqttClient: options.mqttClient }),
         }),
         AuthModule.forRoot({ ...options, clock }),
         TablesModule.forRoot({ ...options, clock }),
+        AccessModule.forRoot({ ...options, clock }),
         DesignsModule.forRoot(),
         JobsModule.forRoot({ historyLimit: config.jobHistoryLimit, clock }),
         HealthModule,

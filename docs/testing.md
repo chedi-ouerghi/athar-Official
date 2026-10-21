@@ -60,9 +60,13 @@ second start being refused as busy, rejected trajectories and durations,
 ordered events, a throwing listener not breaking anything, and every status and
 event saying `mode: 'simulation'` and validating against the shared contract.
 The polar path-length maths is checked against independent numerical
-integration. The factory is checked for `TABLE_MODE=hardware` refusing with the
-documented message, and the application test checks that the refusal happens
-while the application is built and that the driver stops ticking on close.
+integration. The factory is checked for `TABLE_MODE=hardware` building the MQTT driver on a
+fake client (no broker needed), and the application test checks that it is
+bound, reads every table as offline until heard, and ends its connection on
+close. `MqttTableDriver` has its own spec with that fake client: a command
+resolving only on the `ack` of the same table, the 5-second timeout, refusals,
+no publish while a table is not known to be online, presence and the broker
+connection dropping, status routing, and malformed or foreign messages.
 
 **Tables and admin** (`src/tables/*.spec.ts`, `test/tables*.e2e.spec.ts`) — one
 repository contract suite run against both the in-memory and the JSON-file

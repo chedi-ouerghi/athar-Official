@@ -74,9 +74,9 @@ export const environmentSchema = z
     SHUTDOWN_TIMEOUT_MS: INTEGER.min(0).default(10_000),
 
     /**
-     * Which table driver the API talks to. `hardware` is accepted by the schema
-     * but refused at startup until a hardware driver exists (see
-     * `createTableDriver`), so the refusal has one clear, dedicated message.
+     * Which table driver the API talks to: the simulator, or `hardware`, which
+     * reaches the real tables through the MQTT broker below (see
+     * `createTableDriver`).
      */
     TABLE_MODE: z.enum(['simulation', 'hardware']).default('simulation'),
 
@@ -88,6 +88,19 @@ export const environmentSchema = z
 
     /** Progress (0..1) at which an injected simulated fault occurs. */
     SIMULATION_FAULT_AT_PROGRESS: z.coerce.number().min(0).max(1).default(0.6),
+
+    /**
+     * `TABLE_MODE=hardware` only. The broker the tables connect to. Use `mqtts://`
+     * (TLS) outside development: the broker login travels over this connection.
+     */
+    MQTT_URL: z
+      .string()
+      .regex(/^(mqtt|mqtts|ws|wss):\/\/\S+$/, 'must be an mqtt://, mqtts://, ws:// or wss:// URL')
+      .default('mqtt://localhost:1883'),
+
+    /** `TABLE_MODE=hardware` only. The API's own broker login. */
+    MQTT_USERNAME: optionalText,
+    MQTT_PASSWORD: optionalText,
 
     /** Drawing jobs kept per table, newest first. Older finished jobs are forgotten. */
     JOB_HISTORY_LIMIT: INTEGER.min(1).default(20),
@@ -104,6 +117,12 @@ export const environmentSchema = z
 
     /** JSON file that stores sessions (token hashes, never tokens). Same rules as tables. */
     SESSIONS_DATA_FILE: z.string().min(1).default('./data/sessions.json'),
+
+    /**
+     * JSON file that stores claim and share tokens (hashes, never tokens) and the
+     * guests who redeemed one. Same rules as tables.
+     */
+    TABLE_ACCESS_DATA_FILE: z.string().min(1).default('./data/table-access.json'),
 
     /**
      * Origin used to build the link inside a table's QR code:
@@ -123,6 +142,26 @@ export const environmentSchema = z
   })
   .superRefine((environment, context) => {
     const production = environment.NODE_ENV === 'production';
+
+    if (production && environment.TABLE_MODE === 'hardware') {
+      if (!/^(mqtts|wss):\/\//.test(environment.MQTT_URL)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['MQTT_URL'],
+          message: 'must use mqtts:// or wss:// when NODE_ENV=production and TABLE_MODE=hardware',
+        });
+      }
+
+      for (const name of ['MQTT_USERNAME', 'MQTT_PASSWORD'] as const) {
+        if (environment[name] === undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: [name],
+            message: 'is required when NODE_ENV=production and TABLE_MODE=hardware',
+          });
+        }
+      }
+    }
 
     if (
       environment.TRUST_PROXY !== undefined &&

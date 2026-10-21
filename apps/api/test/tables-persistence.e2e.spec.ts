@@ -7,6 +7,7 @@ import { NestApplication } from '@nestjs/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, createConfiguredApp } from '../src/bootstrap.js';
 import { StartupConfigurationError } from '../src/config/startup-configuration.error.js';
+import { FakeMqttClient } from '../src/device/hardware/fake-mqtt-client.js';
 import { JsonFileTableRepository } from '../src/tables/json-file-table.repository.js';
 import { createTestConfig } from './create-test-config.js';
 import { bearer, signIn } from './create-test-app.js';
@@ -27,6 +28,7 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
       TABLES_DATA_FILE: file,
       ACCOUNTS_DATA_FILE: join(directory, 'auth', 'accounts.json'),
       SESSIONS_DATA_FILE: join(directory, 'auth', 'sessions.json'),
+      TABLE_ACCESS_DATA_FILE: join(directory, 'auth', 'table-access.json'),
       ...environment,
     });
 
@@ -191,7 +193,17 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
   });
 
   it('releases the lock if the application fails to come up after opening the file', async () => {
-    const failure = await createConfiguredApp(config({ TABLE_MODE: 'hardware' })).then(
+    // A broker connection that cannot be set up fails the module graph, after the
+    // data files were opened.
+    class BrokenMqttClient extends FakeMqttClient {
+      override on(): never {
+        throw new StartupConfigurationError('The broker connection could not be set up.');
+      }
+    }
+
+    const failure = await createConfiguredApp(config({ TABLE_MODE: 'hardware' }), {
+      mqttClient: new BrokenMqttClient(),
+    }).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -201,6 +213,7 @@ describe('tables persisted in TABLES_DATA_FILE', () => {
     expect(await readdir(join(directory, 'auth'))).toStrictEqual([
       'accounts.json',
       'sessions.json',
+      'table-access.json',
     ]);
   });
 

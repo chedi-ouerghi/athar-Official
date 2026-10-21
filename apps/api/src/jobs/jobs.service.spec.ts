@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawingJobSchema, type DriverStatus } from '@athar/contracts';
+import { drawingJobSchema, type DriverStatus, type Light } from '@athar/contracts';
 import { fixtureTables } from '../../test/table-fixtures.js';
 import { DomainException } from '../common/http/domain.exception.js';
 import { designCollectionV1 } from '../designs/data/designs.v1.js';
@@ -49,6 +49,7 @@ class ScriptedDriver implements TableDriver {
   setAmbience = vi.fn<(tableId: string, ambienceId: string) => Promise<void>>(() =>
     Promise.resolve(),
   );
+  setLight = vi.fn<(tableId: string, light: Light) => Promise<void>>(() => Promise.resolve());
 
   static idle(): DriverStatus {
     return {

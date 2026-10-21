@@ -6,11 +6,12 @@
  * registered over HTTP are created by exactly the same code.
  */
 
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { AuthAccount, Plan, UpdateTableRequest } from '@athar/contracts';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { CLOCK, type Clock } from '../device/clock.js';
 import { DomainException } from '../common/http/domain.exception.js';
+import { GUEST_LOOKUP, type GuestLookup } from './guest-lookup.js';
 import { buildTableLink } from './table-link.js';
 import {
   TABLE_REPOSITORY,
@@ -36,15 +37,32 @@ export interface NewTable {
   readonly voiceAssistant?: boolean;
 }
 
-/** Reading a table (or its jobs), or changing what it does (starting and commanding jobs). */
-export type TableUse = 'read' | 'command';
+/**
+ * Reading a table (or its jobs), changing what it does (starting and commanding
+ * jobs, its light), or managing who else may use it (sharing).
+ */
+export type TableUse = 'read' | 'command' | 'manage';
 
 /**
- * Who may use a table (decision D1): its owner, for anything; an admin, only to
- * read. Everyone else is told the table does not exist.
+ * Who may use a table (decision D1): its owner, for anything; a guest (someone the
+ * owner shared it with, while that lasts), to read and command but not to manage;
+ * an admin, only to read. Everyone else is told the table does not exist.
  */
-export function mayUse(table: TableRecord, account: AuthAccount, use: TableUse): boolean {
-  return table.ownerAccountId === account.id || (use === 'read' && account.role === 'admin');
+export function mayUse(
+  table: TableRecord,
+  account: AuthAccount,
+  use: TableUse,
+  guest = false,
+): boolean {
+  if (table.ownerAccountId === account.id) {
+    return true;
+  }
+
+  if (guest) {
+    return use !== 'manage';
+  }
+
+  return use === 'read' && account.role === 'admin';
 }
 
 /** How many times to retry after generating an id that is already taken. */
@@ -59,6 +77,7 @@ export class TableRegistry {
     @Inject(APP_CONFIG) private readonly config: Pick<AppConfig, 'publicLinkBaseUrl'>,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(TABLE_ID_GENERATOR) private readonly newId: TableIdGenerator,
+    @Optional() @Inject(GUEST_LOOKUP) private readonly guests?: GuestLookup,
   ) {}
 
   /** Register a table under a freshly generated id. The caller never chooses the id. */
@@ -124,7 +143,9 @@ export class TableRegistry {
   ): Promise<TableRecord> {
     const record = await this.repository.get(tableId);
 
-    if (record === undefined || !mayUse(record, account, use)) {
+    const guest = this.guests?.isGuest(tableId, account.id, this.clock.now()) ?? false;
+
+    if (record === undefined || !mayUse(record, account, use, guest)) {
       throw tableNotFound(tableId);
     }
 

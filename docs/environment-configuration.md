@@ -34,7 +34,7 @@ every problem at once.
 | `PORT`                           | integer      | `3000`        | TCP port                                                                |
 | `LOG_LEVEL`                      | enum         | `info`        | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`            |
 | `SHUTDOWN_TIMEOUT_MS`            | integer      | `10000`       | Grace period for in-flight requests on `SIGINT`/`SIGTERM`               |
-| `TABLE_MODE`                     | enum         | `simulation`  | `simulation` or `hardware`; `hardware` refuses to start (below)         |
+| `TABLE_MODE`                     | enum         | `simulation`  | `simulation` or `hardware` (MQTT driver; below)                         |
 | `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`           | Divides simulated drawing durations (`10`: a 10-minute drawing takes 1) |
 | `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`           | Every Nth simulated job faults; `0` never                               |
 | `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`          | Drawing jobs remembered per table (below)                               |
@@ -42,13 +42,14 @@ every problem at once.
 
 ### Data files and QR links
 
-| Variable               | Default                | Purpose                                               |
-| ---------------------- | ---------------------- | ----------------------------------------------------- |
-| `TABLES_DATA_FILE`     | `./data/tables.json`   | JSON file that stores the registered tables           |
-| `ACCOUNTS_DATA_FILE`   | `./data/accounts.json` | JSON file that stores accounts (password hashes only) |
-| `SESSIONS_DATA_FILE`   | `./data/sessions.json` | JSON file that stores sessions (token hashes only)    |
-| `PUBLIC_LINK_BASE_URL` | _(unset)_              | Origin used to build the link in each table's QR code |
-| `TRUST_PROXY`          | _(unset)_              | Reverse proxies whose `X-Forwarded-For` is believed   |
+| Variable                 | Default                    | Purpose                                                                                      |
+| ------------------------ | -------------------------- | -------------------------------------------------------------------------------------------- |
+| `TABLES_DATA_FILE`       | `./data/tables.json`       | JSON file that stores the registered tables                                                  |
+| `ACCOUNTS_DATA_FILE`     | `./data/accounts.json`     | JSON file that stores accounts (password hashes only)                                        |
+| `TABLE_ACCESS_DATA_FILE` | `./data/table-access.json` | JSON file that stores claim and share token hashes and guests. Same rules as the tables file |
+| `SESSIONS_DATA_FILE`     | `./data/sessions.json`     | JSON file that stores sessions (token hashes only)                                           |
+| `PUBLIC_LINK_BASE_URL`   | _(unset)_                  | Origin used to build the link in each table's QR code                                        |
+| `TRUST_PROXY`            | _(unset)_                  | Reverse proxies whose `X-Forwarded-For` is believed                                          |
 
 **`TABLES_DATA_FILE`.** Relative paths are resolved from the directory the API
 runs in (`apps/api` under `pnpm`). The file and its directory are created on
@@ -91,16 +92,12 @@ job it knew as a normal state.
 ### Table mode
 
 `TABLE_MODE` selects the table driver. `simulation` (the default) drives a
-simulated table. `hardware` is a valid value but **the API refuses to start
-with it**, because no hardware driver exists yet:
-
-```
-TABLE_MODE=hardware is not available: no hardware table driver is installed in this build.
-Set TABLE_MODE=simulation.
-```
-
-The refusal happens while the application is being assembled, before any port
-is bound, and exits with a non-zero code. The `SIMULATION_*` variables are read
+simulated table. `hardware` drives real tables through an MQTT broker and reads
+`MQTT_URL` (default `mqtt://localhost:1883`; `mqtt://`, `mqtts://`, `ws://` or
+`wss://`), `MQTT_USERNAME` and `MQTT_PASSWORD`. The API starts even if the broker
+is down (tables read as offline until it is reachable). With `NODE_ENV=production`
+and `hardware`, `MQTT_URL` must be `mqtts://` or `wss://` and both credentials
+are required, or the process refuses to start and says which. The `SIMULATION_*` variables are read
 only by the simulator and have no effect otherwise. They exist so demos and
 manual testing can speed drawings up (`SIMULATION_SPEED_FACTOR=20`) and so the
 error path can be exercised on demand

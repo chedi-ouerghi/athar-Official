@@ -13,9 +13,11 @@ import {
 } from '@nestjs/common';
 import {
   setAmbienceRequestSchema,
+  setLightRequestSchema,
   tableParamsSchema,
   type Pairing,
   type SetAmbienceRequest,
+  type SetLightRequest,
   type Table,
   type TableParams,
 } from '@athar/contracts';
@@ -69,6 +71,19 @@ export class TablesController {
     @Req() request: AuthenticatedRequest,
   ): Promise<Table> {
     return this.tables.setAmbience(params.tableId, body.ambienceId, request.auth);
+  }
+
+  /**
+   * Set the light: off, on, a colour or a named ambience (`ledAmbiences` feature).
+   * Owner or guest, paired, online; returns the table.
+   */
+  @Put(':tableId/light')
+  setLight(
+    @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
+    @Body(new ZodValidationPipe(setLightRequestSchema)) body: SetLightRequest,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<Table> {
+    return this.tables.setLight(params.tableId, body, request.auth);
   }
 
   /** End this session's pairing with the table. Owner only; `204` even if there was none. */
