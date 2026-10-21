@@ -45,6 +45,10 @@ const MESSAGE_BY_CODE: Readonly<Record<ApiErrorCode, ErrorMessageKey>> = {
   ACCOUNT_EXISTS: 'error.generic',
   PAIRING_REQUIRED: 'error.generic',
   FEATURE_NOT_IN_PLAN: 'error.generic',
+  // Pairing and custom designs: their screens bring their own messages.
+  PAIRING_TOKEN_INVALID: 'error.generic',
+  TABLE_ALREADY_CLAIMED: 'error.generic',
+  DESIGN_READ_ONLY: 'error.generic',
 };
 
 /** Failures that never reached a JSON error from the API. */

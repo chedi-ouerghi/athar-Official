@@ -39,6 +39,12 @@ export const apiErrorCodeSchema = z.enum([
   // Ownership and plans.
   'PAIRING_REQUIRED',
   'FEATURE_NOT_IN_PLAN',
+  // Claiming and sharing a table. One code covers an unknown, expired, used-up
+  // or revoked token, so a caller cannot tell which tokens exist.
+  'PAIRING_TOKEN_INVALID',
+  'TABLE_ALREADY_CLAIMED',
+  // Deleting a catalogue design: the catalogue is code, not data.
+  'DESIGN_READ_ONLY',
 ]);
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 

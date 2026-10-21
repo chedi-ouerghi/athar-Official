@@ -12,6 +12,7 @@
 import { z } from 'zod';
 import { accountDisplayNameSchema, authAccountSchema, emailSchema } from './auth.js';
 import { planSchema } from './entitlements.js';
+import { pairingLinkSchema, pairingTokenSchema } from './pairing.js';
 import { tableIdSchema } from './table.js';
 
 /** Fields an admin can set on a table. Shared by create and update. */
@@ -101,15 +102,71 @@ export type UpdateTableResponse = AdminTable;
  * Payload of `GET /api/v1/admin/tables/:tableId/qr`.
  *
  * `link` is what the QR code encodes: `https://<domain>/t/<tableId>` in
- * production. It contains only the public table id. A QR code is never proof of
- * authorisation, and this response must not grow a token or signature field
- * without a deliberate access-control decision.
+ * production. It contains only the public table id, so it identifies a table
+ * and grants nothing. The link that claims a table is different: it carries a
+ * one-time token and comes from `provisionTableResponseSchema` (decision taken
+ * with the pairing flow).
  */
 export const tableQrResponseSchema = z.object({
   tableId: tableIdSchema,
   link: z.url(),
 });
 export type TableQrResponse = z.infer<typeof tableQrResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Provisioning
+// ---------------------------------------------------------------------------
+
+/**
+ * Body of `POST /api/v1/admin/tables/provision`: a table that nobody owns yet.
+ * The customer claims it with the QR code, so there is no `ownerAccountId`.
+ */
+export const provisionTableRequestSchema = createTableRequestSchema.omit({ ownerAccountId: true });
+export type ProvisionTableRequest = z.input<typeof provisionTableRequestSchema>;
+
+/**
+ * The broker login of one table's controller. Shown once, never stored in clear.
+ * `tls` is false only in development, against a local `mqtt://` broker: in
+ * production the API refuses any other broker URL than `mqtts://` or `wss://`.
+ */
+export const mqttCredentialsSchema = z.object({
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  tls: z.boolean(),
+  clientId: z.string().min(1),
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+export type MqttCredentials = z.infer<typeof mqttCredentialsSchema>;
+
+/** A claim link with its raw token: shown once, because the server keeps only a hash. */
+export const claimTokenSchema = pairingLinkSchema.extend({ token: pairingTokenSchema });
+export type ClaimToken = z.infer<typeof claimTokenSchema>;
+
+/**
+ * Payload of `POST /api/v1/admin/tables/provision` (`201`).
+ *
+ * `mqtt` is for the Raspberry Pi and is returned once. `pairing` is for the
+ * customer: its link is the only thing the QR code holds, and it holds no
+ * credential.
+ */
+export const provisionTableResponseSchema = z.object({
+  table: adminTableSchema,
+  mqtt: mqttCredentialsSchema,
+  pairing: claimTokenSchema,
+});
+export type ProvisionTableResponse = z.infer<typeof provisionTableResponseSchema>;
+
+/**
+ * Payload of `POST /api/v1/admin/tables/:tableId/claim-token` (`201`): a new claim
+ * link for a table nobody owns yet, replacing the earlier one, which stops
+ * working. For a printed code that expired while the table sat in stock.
+ */
+export const claimTokenResponseSchema = z.object({
+  tableId: tableIdSchema,
+  pairing: claimTokenSchema,
+});
+export type ClaimTokenResponse = z.infer<typeof claimTokenResponseSchema>;
 
 // ---------------------------------------------------------------------------
 // Customers
