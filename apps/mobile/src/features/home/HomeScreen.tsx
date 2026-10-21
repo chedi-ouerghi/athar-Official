@@ -16,6 +16,7 @@ export interface HomeScreenProps {
   readonly onScan: () => void;
   readonly onTable: (tableId: string) => void;
   readonly onDiagnostics: () => void;
+  readonly onSignOut: () => void | Promise<unknown>;
 }
 
 /** Wordmark tracking, in px. Applied to the Latin name only: tracking breaks Arabic joins. */
@@ -27,6 +28,7 @@ export function HomeScreen({
   onScan,
   onTable,
   onDiagnostics,
+  onSignOut,
 }: HomeScreenProps): ReactElement {
   const { t } = useI18n();
   const theme = useTheme();
@@ -82,6 +84,12 @@ export function HomeScreen({
           variant="ghost"
           onPress={onDiagnostics}
           testID="home-diagnostics"
+        />
+        <Button
+          label={t('home.signOut')}
+          variant="ghost"
+          onPress={onSignOut}
+          testID="home-sign-out"
         />
       </FadeIn>
     </Screen>

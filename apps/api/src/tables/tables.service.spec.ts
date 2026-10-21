@@ -63,6 +63,7 @@ describe('TablesService', () => {
       features: ['catalogue', 'rake'],
       ambienceId: null,
       readiness: { paired: false, online: true, free: true, canStart: false },
+      access: { role: 'guest' },
     });
   });
 
@@ -116,6 +117,7 @@ describe('TablesService', () => {
     const { service } = setup();
 
     expect(Object.keys(await service.getTable('table-001')).sort()).toStrictEqual([
+      'access',
       'activeJobId',
       'ambienceId',
       'connection',

@@ -7,9 +7,10 @@ const ID = 'k7q3x9m2d8r5t6w4';
 
 function setup() {
   const onTable = jest.fn<(tableId: string) => void>();
-  const hook = renderHook(() => useQrScan({ allowedHosts: HOSTS, onTable }));
+  const onPairing = jest.fn<(link: { tableId: string; token: string }) => void>();
+  const hook = renderHook(() => useQrScan({ allowedHosts: HOSTS, onTable, onPairing }));
 
-  return { onTable, ...hook };
+  return { onTable, onPairing, ...hook };
 }
 
 describe('useQrScan', () => {
@@ -88,5 +89,34 @@ describe('useQrScan', () => {
     });
 
     expect(onTable).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useQrScan: pairing links', () => {
+  const TOKEN = 'A'.repeat(43);
+
+  it('hands a pairing QR code to onPairing, once, and never opens a table', () => {
+    const { result, onTable, onPairing } = setup();
+
+    act(() => {
+      for (let frame = 0; frame < 5; frame += 1) {
+        result.current.onScanned(`https://app.athar.example/pair?tableId=${ID}&token=${TOKEN}`);
+      }
+    });
+
+    expect(onPairing).toHaveBeenCalledTimes(1);
+    expect(onPairing).toHaveBeenCalledWith({ tableId: ID, token: TOKEN });
+    expect(onTable).not.toHaveBeenCalled();
+  });
+
+  it('treats a pairing link with a malformed token as unrecognised', () => {
+    const { result, onPairing } = setup();
+
+    act(() => {
+      result.current.onScanned(`athar://pair?tableId=${ID}&token=short`);
+    });
+
+    expect(result.current.unrecognised).toBe(true);
+    expect(onPairing).not.toHaveBeenCalled();
   });
 });

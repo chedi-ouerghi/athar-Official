@@ -205,3 +205,34 @@ describe('TableScreen', () => {
     expect(screen.getByText('اختر تصميمًا')).toBeTruthy();
   });
 });
+
+describe('TableScreen: what each role is shown', () => {
+  const personalized = (role: 'owner' | 'guest' | 'admin') =>
+    table({
+      plan: 'personalized',
+      features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences'],
+      access: { role },
+    });
+
+  it('shows an owner the light and the invitation', async () => {
+    setup(() => Promise.resolve(personalized('owner')));
+
+    expect(await screen.findByTestId('light-control')).toBeTruthy();
+    expect(screen.getByTestId('share-control')).toBeTruthy();
+  });
+
+  it('shows a guest the light but no way to invite anyone', async () => {
+    setup(() => Promise.resolve(personalized('guest')));
+
+    expect(await screen.findByTestId('light-control')).toBeTruthy();
+    expect(screen.queryByTestId('share-control')).toBeNull();
+    expect(screen.queryByTestId('share-create')).toBeNull();
+  });
+
+  it('offers no light when the plan does not include it', async () => {
+    setup(() => Promise.resolve(table({ access: { role: 'owner' } })));
+
+    expect(await screen.findByTestId('share-control')).toBeTruthy();
+    expect(screen.queryByTestId('light-control')).toBeNull();
+  });
+});

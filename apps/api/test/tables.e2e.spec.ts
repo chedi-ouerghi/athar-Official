@@ -62,6 +62,7 @@ describe('tables over HTTP', () => {
         ambienceId: null,
         // Not paired yet, so it cannot start.
         readiness: { paired: false, online: true, free: true, canStart: false },
+        access: { role: 'owner' },
       });
     });
 

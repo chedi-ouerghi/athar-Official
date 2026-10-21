@@ -19,6 +19,7 @@ export function table(overrides: Partial<Table> = {}): Table {
     features: ['catalogue', 'rake'],
     ambienceId: null,
     readiness: { paired: true, online: true, free: true, canStart: true },
+    access: { role: 'owner' },
     ...overrides,
   };
 }

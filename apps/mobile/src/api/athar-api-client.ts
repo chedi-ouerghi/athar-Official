@@ -8,6 +8,16 @@
 
 import {
   API_V1_PREFIX,
+  activateRequestSchema,
+  createShareRequestSchema,
+  createShareResponseSchema,
+  loginRequestSchema,
+  pairTableRequestSchema,
+  pairTableResponseSchema,
+  pairingSchema,
+  refreshRequestSchema,
+  sessionResponseSchema,
+  setLightRequestSchema,
   getDesignResponseSchema,
   getJobResponseSchema,
   getTableResponseSchema,
@@ -20,16 +30,26 @@ import {
   setAmbienceRequestSchema,
   startJobRequestSchema,
   startJobResponseSchema,
+  type ActivateRequest,
+  type CreateShareRequest,
+  type CreateShareResponse,
   type DesignDetail,
   type DrawingJob,
   type HealthResponse,
   type ListAmbiencesResponse,
   type ListDesignsResponse,
   type ListJobsResponse,
+  type LightInput,
+  type LoginRequest,
+  type PairTableRequest,
+  type PairTableResponse,
+  type Pairing,
   type ReadyResponse,
+  type SessionResponse,
   type StartJobRequestInput,
   type Table,
 } from '@athar/contracts';
+import { z } from 'zod';
 import type { AppEnvironment } from '../config/env';
 import { ApiError, HttpClient, type FetchLike } from './http-client';
 
@@ -42,6 +62,8 @@ export interface AtharApiClientOptions {
   readonly fetchImpl?: FetchLike;
   /** Source of the `x-request-id` sent with every call. Defaults to a random UUID. */
   readonly generateRequestId?: () => string;
+  /** Bearer token of the signed-in session, if any. */
+  readonly accessToken?: () => Promise<string | undefined>;
 }
 
 /** One path segment, safe to splice into a route whatever the id contains. */
@@ -67,6 +89,7 @@ export class AtharApiClient {
       timeoutMs: environment.apiTimeoutMs,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       ...(options.generateRequestId ? { generateRequestId: options.generateRequestId } : {}),
+      ...(options.accessToken ? { accessToken: options.accessToken } : {}),
     });
   }
 
@@ -150,6 +173,112 @@ export class AtharApiClient {
       getTableResponseSchema,
       signal ? { signal } : {},
     );
+  }
+
+  /** Sign in. The only calls that need no session are this, {@link activate} and {@link refresh}. */
+  login(request: LoginRequest, signal?: AbortSignal): Promise<SessionResponse> {
+    return this.http.post(
+      `${API_V1_PREFIX}/auth/login`,
+      loginRequestSchema.parse(request),
+      sessionResponseSchema,
+      { anonymous: true, ...(signal ? { signal } : {}) },
+    );
+  }
+
+  /** First sign-in with the one-time code an admin handed out. */
+  activate(request: ActivateRequest, signal?: AbortSignal): Promise<SessionResponse> {
+    return this.http.post(
+      `${API_V1_PREFIX}/auth/activate`,
+      activateRequestSchema.parse(request),
+      sessionResponseSchema,
+      { anonymous: true, ...(signal ? { signal } : {}) },
+    );
+  }
+
+  /** Exchange a refresh token (usable once) for a new session. */
+  refresh(refreshToken: string, signal?: AbortSignal): Promise<SessionResponse> {
+    return this.http.post(
+      `${API_V1_PREFIX}/auth/refresh`,
+      refreshRequestSchema.parse({ refreshToken }),
+      sessionResponseSchema,
+      { anonymous: true, ...(signal ? { signal } : {}) },
+    );
+  }
+
+  /** End the current session on the server. */
+  async logout(signal?: AbortSignal): Promise<void> {
+    await this.http.post(
+      `${API_V1_PREFIX}/auth/logout`,
+      {},
+      z.undefined(),
+      signal ? { signal } : {},
+    );
+  }
+
+  /**
+   * Redeem a QR code or an invitation: the first account to claim a table owns it,
+   * anyone else holding a share token becomes its guest. The server tells which.
+   */
+  pairTable(request: PairTableRequest, signal?: AbortSignal): Promise<PairTableResponse> {
+    return this.http.post(
+      `${API_V1_PREFIX}/tables/pair`,
+      pairTableRequestSchema.parse(request),
+      pairTableResponseSchema,
+      signal ? { signal } : {},
+    );
+  }
+
+  /** Invite guests to a table (owner only). The link in the answer is shown once. */
+  createShare(
+    tableId: string,
+    request: Partial<CreateShareRequest> = {},
+    signal?: AbortSignal,
+  ): Promise<CreateShareResponse> {
+    return this.http.post(
+      `${API_V1_PREFIX}/tables/${segment(tableId)}/shares`,
+      createShareRequestSchema.parse(request),
+      createShareResponseSchema,
+      signal ? { signal } : {},
+    );
+  }
+
+  /**
+   * Open (or extend) this session's pairing with the table, which a drawing or a
+   * light command needs. It lapses after 15 idle minutes.
+   */
+  openPairing(tableId: string, signal?: AbortSignal): Promise<Pairing> {
+    return this.http.post(
+      `${API_V1_PREFIX}/tables/${segment(tableId)}/pairing`,
+      {},
+      pairingSchema,
+      signal ? { signal } : {},
+    );
+  }
+
+  /**
+   * Set the table's light. Returns the updated table. A lapsed pairing is reopened
+   * once, so a user who left the screen open for a while does not see an error.
+   */
+  async setLight(tableId: string, light: LightInput, signal?: AbortSignal): Promise<Table> {
+    const send = () =>
+      this.http.put(
+        `${API_V1_PREFIX}/tables/${segment(tableId)}/light`,
+        setLightRequestSchema.parse(light),
+        getTableResponseSchema,
+        signal ? { signal } : {},
+      );
+
+    try {
+      return await send();
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== 'PAIRING_REQUIRED') {
+        throw error;
+      }
+
+      await this.openPairing(tableId, signal);
+
+      return send();
+    }
   }
 
   /** The job as the API last learnt it. Reads have no side effects. */

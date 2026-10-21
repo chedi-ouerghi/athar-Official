@@ -9,6 +9,9 @@ import { useTheme } from '../components/use-theme';
 import { environment } from '../config/environment';
 import { fontSources } from '../fonts';
 import { I18nProvider } from '../i18n/I18nProvider';
+import { secureSessionStorage } from '../session/secure-session-storage';
+import { SessionManager } from '../session/session-manager';
+import { SessionProvider, useSession } from '../session/SessionProvider';
 import { fontFamily } from '../theme';
 
 /**
@@ -39,26 +42,57 @@ export default function RootLayout() {
 }
 
 function ApiProviderAndStack() {
-  const theme = useTheme();
-  const client = useMemo(() => new AtharApiClient(environment), []);
+  const { client, session } = useMemo(() => {
+    const manager: SessionManager = new SessionManager(secureSessionStorage, (token) =>
+      apiClient.refresh(token),
+    );
+    const apiClient: AtharApiClient = new AtharApiClient(environment, {
+      accessToken: () => manager.accessToken(),
+    });
+
+    return { client: apiClient, session: manager };
+  }, []);
 
   return (
     <ApiClientProvider client={client}>
-      <Stack
-        screenOptions={{
-          // Titles live in the screens; the header only carries the back arrow,
-          // which the native stack mirrors for right-to-left languages.
-          title: '',
-          headerBackTitle: '',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: theme.background },
-          headerTintColor: theme.text,
-          headerTitleStyle: { fontFamily: fontFamily.semibold },
-          contentStyle: { backgroundColor: theme.background },
-        }}
-      >
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-      </Stack>
+      <SessionProvider manager={session}>
+        <AppStack />
+      </SessionProvider>
     </ApiClientProvider>
+  );
+}
+
+/** Every screen but the sign-in and the connection details needs a session. */
+function AppStack() {
+  const theme = useTheme();
+  const signedIn = useSession().account !== undefined;
+
+  return (
+    <Stack
+      screenOptions={{
+        // Titles live in the screens; the header only carries the back arrow,
+        // which the native stack mirrors for right-to-left languages.
+        title: '',
+        headerBackTitle: '',
+        headerShadowVisible: false,
+        headerStyle: { backgroundColor: theme.background },
+        headerTintColor: theme.text,
+        headerTitleStyle: { fontFamily: fontFamily.semibold },
+        contentStyle: { backgroundColor: theme.background },
+      }}
+    >
+      <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="scan" />
+        <Stack.Screen name="pair" options={{ headerShown: false }} />
+        <Stack.Screen name="t/[tableId]/index" />
+        <Stack.Screen name="t/[tableId]/designs/[designId]" />
+        <Stack.Screen name="t/[tableId]/jobs/[jobId]" />
+        <Stack.Screen name="t/[tableId]/jobs/[jobId]/result" />
+      </Stack.Protected>
+      <Stack.Protected guard={!signedIn}>
+        <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+      </Stack.Protected>
+    </Stack>
   );
 }

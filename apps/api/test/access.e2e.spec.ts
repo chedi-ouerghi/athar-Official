@@ -440,7 +440,9 @@ describe('sharing a table with guests', () => {
         role: 'guest',
         expiresAt: api.created.expiresAt,
       });
-      await api.read(guest, api.tableId).expect(200);
+      const seen = await api.read(guest, api.tableId).expect(200);
+
+      expect(seen.body).toMatchObject({ access: { role: 'guest' } });
     });
 
     it('can follow the same link again without using it up', async () => {

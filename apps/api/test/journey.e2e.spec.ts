@@ -119,6 +119,7 @@ describe('the full journey', () => {
       features: ['catalogue', 'rake'],
       ambienceId: null,
       readiness: { paired: true, online: true, free: true, canStart: true },
+      access: { role: 'owner' },
     });
 
     // The app lists the four designs and the visitor picks one.

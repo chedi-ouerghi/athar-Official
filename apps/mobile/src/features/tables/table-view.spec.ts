@@ -1,7 +1,8 @@
+import type { Table } from '@athar/contracts';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/http-client';
 import { apiError, networkError, table } from '../../test-fixtures';
-import { classifyTableView } from './table-view';
+import { capabilitiesOf, classifyTableView } from './table-view';
 
 const ready = (overrides: Parameters<typeof table>[0] = {}) =>
   ({ status: 'ready', data: table(overrides) }) as const;
@@ -47,5 +48,39 @@ describe('classifyTableView', () => {
     ]) {
       expect(classifyTableView({ status: 'error', error })).toBe('error');
     }
+  });
+});
+
+describe('capabilitiesOf', () => {
+  const personalized: { features: Table['features'] } = {
+    features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences'],
+  };
+
+  it('gives an owner of a personalized table the light and the sharing', () => {
+    expect(capabilitiesOf(table({ ...personalized, access: { role: 'owner' } }))).toStrictEqual({
+      light: true,
+      share: true,
+    });
+  });
+
+  it('lets a guest use the light but never invite anyone', () => {
+    expect(capabilitiesOf(table({ ...personalized, access: { role: 'guest' } }))).toStrictEqual({
+      light: true,
+      share: false,
+    });
+  });
+
+  it('shows an admin neither', () => {
+    expect(capabilitiesOf(table({ ...personalized, access: { role: 'admin' } }))).toStrictEqual({
+      light: false,
+      share: false,
+    });
+  });
+
+  it('hides the light when the plan does not include it', () => {
+    expect(capabilitiesOf(table({ access: { role: 'owner' } }))).toStrictEqual({
+      light: false,
+      share: true,
+    });
   });
 });

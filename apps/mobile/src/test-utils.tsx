@@ -30,7 +30,11 @@ type ClientMethod =
   | 'pauseJob'
   | 'resumeJob'
   | 'stopJob'
-  | 'listJobs';
+  | 'listJobs'
+  | 'openPairing'
+  | 'pairTable'
+  | 'createShare'
+  | 'setLight';
 
 /** A client that answers only what a test defines; anything else fails loudly. */
 export function stubClient(

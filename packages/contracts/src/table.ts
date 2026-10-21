@@ -35,6 +35,16 @@ export const tableReadinessSchema = z.object({
 });
 export type TableReadiness = z.infer<typeof tableReadinessSchema>;
 
+/**
+ * How the calling account relates to the table: its `owner`, a `guest` the owner
+ * invited, or an `admin` (read only). The app shows only what the role may do; the
+ * API enforces it regardless.
+ */
+export const tableAccessSchema = z.object({
+  role: z.enum(['owner', 'guest', 'admin']),
+});
+export type TableAccess = z.infer<typeof tableAccessSchema>;
+
 export const tableSchema = z.object({
   id: tableIdSchema,
   displayName: z.string(),
@@ -58,6 +68,8 @@ export const tableSchema = z.object({
   ambienceId: z.string().min(1).nullable(),
   /** The drawing conditions, for the calling session. */
   readiness: tableReadinessSchema,
+  /** The calling account's role on this table. */
+  access: tableAccessSchema,
 });
 export type Table = z.infer<typeof tableSchema>;
 

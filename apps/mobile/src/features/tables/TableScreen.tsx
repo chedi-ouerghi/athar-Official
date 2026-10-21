@@ -14,7 +14,9 @@ import { useTheme } from '../../components/use-theme';
 import { useI18n } from '../../i18n/context';
 import { radius, spacing } from '../../theme';
 import { useDesigns } from '../designs/useDesigns';
-import { CONNECTION_LABEL_KEY, classifyTableView } from './table-view';
+import { LightControl } from '../light/LightControl';
+import { ShareControl } from '../share/ShareControl';
+import { CONNECTION_LABEL_KEY, capabilitiesOf, classifyTableView } from './table-view';
 import { useTable } from './useTable';
 
 export interface TableScreenProps {
@@ -94,6 +96,7 @@ export function TableScreen({
   }
 
   const data = table.state.data;
+  const capabilities = capabilitiesOf(data);
 
   return (
     <Screen testID="table-screen">
@@ -135,6 +138,9 @@ export function TableScreen({
       ) : null}
 
       {view === 'ready' ? <DesignList onOpenDesign={onOpenDesign} /> : null}
+
+      {capabilities.light && view !== 'disabled' ? <LightControl tableId={data.id} /> : null}
+      {capabilities.share ? <ShareControl tableId={data.id} /> : null}
     </Screen>
   );
 }
