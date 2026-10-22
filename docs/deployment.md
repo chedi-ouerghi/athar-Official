@@ -1,7 +1,11 @@
 # Deployment
 
-Nothing has been deployed. This document says how to, what was checked on a
-development machine, and what is still open. Commands marked **(verified)** were run
+Nothing has been deployed to a server. **Current plan: everything is installed and tested on
+site, on a Raspberry Pi** (API and broker in Docker, the phone on the same Wi-Fi); see
+[hardware/GUIDE-EQUIPE-DUBAI.md](../hardware/GUIDE-EQUIPE-DUBAI.md). The Google Cloud VM below
+is paused, not removed, and comes later. The Raspberry Pi program that bridges the broker and
+the board (`apps/table-agent`) is not written yet. This document says how to deploy, what was
+checked on a development machine, and what is still open. Commands marked **(verified)** were run
 for this document; everything else is instruction, not evidence.
 
 The product is two independent pieces (architecture.md, "Deployment"): the **API**,
@@ -114,6 +118,23 @@ With `TABLE_MODE=hardware` the API drives real tables through an MQTT broker
 reports `tableMode`). Point the host's health check at `/ready`, or at `/health` if a
 restart loop on a failing dependency is not wanted.
 
+### Test stack on one GCP VM (paused)
+
+`deploy/` holds a Docker Compose stack (Caddy for HTTPS, the API, Mosquitto over
+`wss://`) for a single free-tier VM, and `.github/workflows/deploy-api.yml` rebuilds
+and redeploys the API. The workflow is **manual** (`workflow_dispatch`) until the VM exists;
+its header says how to bring back the automatic deploy on each push to `master`. Setup, step
+by step: [deploy/README.md](../deploy/README.md).
+
+### On-site test stack (Raspberry Pi)
+
+`deploy/docker-compose.local.yml` is an override of the stack above: no Caddy, the API image built
+on the Pi (arm64), plain MQTT on port 1883, `NODE_ENV=development` (the only mode that accepts a broker
+without TLS). Run it with `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
+from `deploy/`. Step by step: [hardware/GUIDE-EQUIPE-DUBAI.md](../hardware/GUIDE-EQUIPE-DUBAI.md);
+what each test level must show: [hardware/TESTING.md](../hardware/TESTING.md). The admin page is
+described in [admin.md](admin.md).
+
 ### Choosing a host
 
 What the API needs from a host: run a Node process, keep **one** instance, give it a
@@ -124,12 +145,12 @@ deciding.**
 
 |                      | Render                                                                                                          | Railway                                   | Fly.io                                                              | Plain VPS (any provider)                                    |
 | -------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Build from this repo | Build and start commands, no Docker needed                                                                      | Detects Node; commands configurable       | Needs a container image (Dockerfile; none is in the repo yet)       | You run the build yourself                                  |
+| Build from this repo | Build and start commands, no Docker needed                                                                      | Detects Node; commands configurable       | Needs a container image (`apps/api/Dockerfile`)                     | You run the build yourself                                  |
 | Persistent volume    | "Persistent disk", only on paid instance types                                                                  | Volumes attach to a service               | Volumes, tied to one machine in one region                          | The server's own disk                                       |
 | Single instance fit  | A service with a disk cannot scale out, and redeploys stop the old instance first, which is what the lock wants | One replica with a volume                 | Run exactly one machine; a second one gets its own, separate volume | One process; trivially single                               |
 | HTTPS and domain     | Automatic                                                                                                       | Automatic                                 | Automatic                                                           | You set up a reverse proxy (e.g. Caddy) and `TRUST_PROXY=1` |
 | Operating effort     | Low                                                                                                             | Low                                       | Medium (container, CLI)                                             | Highest (OS updates, process manager, backups)              |
-| Main drawback here   | Disk costs a paid plan; brief downtime per deploy                                                               | Volume plus single replica; check regions | Dockerfile to write and maintain; volume bound to one machine       | You own everything                                          |
+| Main drawback here   | Disk costs a paid plan; brief downtime per deploy                                                               | Volume plus single replica; check regions | Dockerfile to maintain; volume bound to one machine                 | You own everything                                          |
 
 A reasonable first choice is **Render or Railway**: least work, and both fit "one
 instance, one volume". Fly.io is attractive if multi-region later matters, but the JSON

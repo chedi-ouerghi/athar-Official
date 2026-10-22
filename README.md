@@ -3,8 +3,10 @@
 ATHAR: an Expo mobile application and a NestJS backend, in a single pnpm
 workspace. A visitor scans the QR code on a sand table, browses four designs,
 starts a drawing, watches it progress, and can pause, resume or stop it. The table
-is **simulated**: no hardware driver exists yet, and the app says "Simulation" on
-every screen that shows a table or a drawing.
+is **simulated** by default (`TABLE_MODE=simulation`, and the app says "Simulation" on
+every screen that shows a table or a drawing). A hardware mode exists on the API side
+(`TABLE_MODE=hardware`, MQTT driver), but the program that runs on the table's Raspberry Pi and
+drives the board (`apps/table-agent`) is **not written yet**.
 
 ## Status
 
@@ -14,8 +16,10 @@ browse the four designs, start, pause, resume, complete and draw again; stop wit
 confirmation; an injected fault; an unknown table; a disabled table; a second start
 while busy; the API stopped and restarted mid-drawing. English and Arabic are
 implemented. Not yet verified: scanning a QR code with the camera, a physical phone,
-iOS, and the Arabic layout on a device. Nothing is deployed; see
-[docs/deployment.md](docs/deployment.md).
+iOS, and the Arabic layout on a device. Nothing is deployed to a server. The hardware
+team installs and tests everything **on site, on a Raspberry Pi** (API and broker in Docker, phone on
+the same Wi-Fi): [hardware/GUIDE-EQUIPE-DUBAI.md](hardware/GUIDE-EQUIPE-DUBAI.md). The Google
+Cloud stack is paused, not removed; see [docs/deployment.md](docs/deployment.md).
 
 ## Requirements
 
@@ -64,9 +68,12 @@ whether the backend answers, and its table mode.
 apps/
   mobile/      Expo (React Native) application
   api/         NestJS backend
+  admin/       Back-office, a single index.html (see docs/admin.md)
 packages/
   contracts/   Shared Zod schemas and transport types
   config/      Shared ESLint and Prettier configuration
+deploy/        Docker stacks: on-site test (local) and Google Cloud (paused)
+hardware/      Board config, broker ACL, Pi setup, test guide for the hardware team
 docs/
 ```
 
@@ -119,15 +126,21 @@ device** at a development machine, are in
 | [docs/api-conventions.md](docs/api-conventions.md)                                 | Routing, versioning, validation and the error contract     |
 | [docs/testing.md](docs/testing.md)                                                 | Test layers, how to run them, what was verified by hand    |
 | [docs/deployment.md](docs/deployment.md)                                           | Production start, variables, storage, hosts, EAS profiles  |
+| [docs/admin.md](docs/admin.md)                                                     | The admin page, step by step                               |
+| [hardware/GUIDE-EQUIPE-DUBAI.md](hardware/GUIDE-EQUIPE-DUBAI.md)                   | On-site hardware test guide (French, for beginners)        |
 | [docs/future-infrastructure-decisions.md](docs/future-infrastructure-decisions.md) | Deferred dependencies and the triggers for adding them     |
 
 ## Scope
 
-Explicitly **out of scope** for now, and intentionally absent: hardware drivers
-(the table connects to the backend over the network, not to the phone),
-authentication and access control on the public endpoints, payments, a database
-(tables live in a JSON file, drawings in memory, so the API runs as a single
-instance), Docker, CI/CD and rate limiting. Each is listed in
+**Now in scope**: accounts and sessions (admin and customers), table claiming and sharing, the
+MQTT driver and broker, an admin page, a Docker image of the API, and a local Docker stack for
+on-site tests. **Current plan**: test everything on site on a Raspberry Pi; the Google Cloud VM
+comes later (its files are kept); the Raspberry Pi **agent** (`apps/table-agent`) still has to be written.
+
+Explicitly **out of scope** for now, and intentionally absent: payments, a database
+(tables live in JSON files, drawings in memory, so the API runs as a single
+instance), automatic deployment (the workflow is manual until the VM exists) and
+rate limiting beyond the sign-in throttle. Each is listed in
 [docs/future-infrastructure-decisions.md](docs/future-infrastructure-decisions.md)
 together with the requirement that would justify introducing it, and the open
 product decisions are in [docs/architecture.md](docs/architecture.md#9-open-decisions).
