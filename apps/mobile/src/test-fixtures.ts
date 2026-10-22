@@ -16,6 +16,7 @@ export function table(overrides: Partial<Table> = {}): Table {
     activeJobId: null,
     plan: 'basic',
     voiceAssistant: false,
+    geometry: { shape: 'rectangle', widthMm: 1200, heightMm: 800 },
     features: ['catalogue', 'rake'],
     ambienceId: null,
     readiness: { paired: true, online: true, free: true, canStart: true },

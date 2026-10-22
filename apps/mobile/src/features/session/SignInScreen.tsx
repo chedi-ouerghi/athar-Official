@@ -1,15 +1,23 @@
 import { useState, type ReactElement } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { errorMessageKey } from '../../api/error-messages';
 import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { DotRule } from '../../components/DotRule';
+import { FadeIn, staggerDelay } from '../../components/FadeIn';
+import { Field } from '../../components/Field';
+import { Headline } from '../../components/Headline';
 import { LanguageSwitch } from '../../components/LanguageSwitch';
+import { Ornament } from '../../components/Ornament';
 import { Screen } from '../../components/Screen';
-import { useTheme } from '../../components/use-theme';
+import { SegmentedControl } from '../../components/SegmentedControl';
 import { useI18n } from '../../i18n/context';
 import { useSession } from '../../session/SessionProvider';
-import { MIN_TOUCH_TARGET, radius, spacing, typography } from '../../theme';
+import { spacing } from '../../theme';
 import { useAction } from '../use-action';
+
+type Mode = 'signIn' | 'activate';
 
 /**
  * Sign in, or activate an account with the one-time code an admin handed out. On
@@ -17,12 +25,12 @@ import { useAction } from '../use-action';
  */
 export function SignInScreen(): ReactElement {
   const { t } = useI18n();
-  const theme = useTheme();
   const session = useSession();
-  const [activating, setActivating] = useState(false);
+  const [mode, setMode] = useState<Mode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
+  const activating = mode === 'activate';
 
   const submit = useAction(() =>
     activating
@@ -32,81 +40,86 @@ export function SignInScreen(): ReactElement {
 
   const ready = email.trim() !== '' && password !== '' && (!activating || code.trim() !== '');
 
-  const field = (
-    label: string,
-    value: string,
-    onChange: (text: string) => void,
-    options: { secure?: boolean; testID: string; keyboard?: 'email-address' },
-  ) => (
-    <View style={styles.field}>
-      <AppText variant="label" tone="textMuted">
-        {label}
-      </AppText>
-      <TextInput
-        accessibilityLabel={label}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType={options.keyboard ?? 'default'}
-        onChangeText={onChange}
-        secureTextEntry={options.secure === true}
-        style={[
-          styles.input,
-          typography.body,
-          { color: theme.text, backgroundColor: theme.surface, borderColor: theme.border },
-        ]}
-        testID={options.testID}
-        value={value}
-      />
-    </View>
-  );
-
   return (
-    <Screen testID="sign-in-screen">
-      <AppText variant="title" accessibilityRole="header">
-        {t('signIn.title')}
-      </AppText>
-
-      {field(t('signIn.email'), email, setEmail, {
-        testID: 'sign-in-email',
-        keyboard: 'email-address',
-      })}
-      {activating ? field(t('signIn.code'), code, setCode, { testID: 'sign-in-code' }) : null}
-      {field(activating ? t('signIn.newPassword') : t('signIn.password'), password, setPassword, {
-        secure: true,
-        testID: 'sign-in-password',
-      })}
-
-      {submit.state.status === 'error' ? (
-        <AppText tone="danger" accessibilityRole="alert" testID="sign-in-error">
-          {t(errorMessageKey(submit.state.error))}
+    <Screen testID="sign-in-screen" contentStyle={styles.content}>
+      <FadeIn style={styles.brand}>
+        <Ornament size={92} strength={0.85} />
+        <Headline variant="title" style={styles.title}>
+          {t('signIn.title')}
+        </Headline>
+        <View style={styles.rule}>
+          <DotRule />
+        </View>
+        <AppText tone="textMuted" style={styles.subtitle}>
+          {t('signIn.subtitle')}
         </AppText>
-      ) : null}
+      </FadeIn>
 
-      <Button
-        label={activating ? t('signIn.activate') : t('signIn.submit')}
-        disabled={!ready}
-        onPress={submit.run}
-        testID="sign-in-submit"
-      />
-      <Button
-        label={activating ? t('signIn.haveAccount') : t('signIn.haveCode')}
-        variant="ghost"
-        onPress={() => {
-          setActivating(!activating);
-        }}
-        testID="sign-in-toggle"
-      />
-      <LanguageSwitch />
+      <FadeIn delay={staggerDelay(1)}>
+        <SegmentedControl<Mode>
+          options={[
+            { value: 'signIn', label: t('signIn.tab.signIn'), testID: 'sign-in-tab-signin' },
+            { value: 'activate', label: t('signIn.tab.activate'), testID: 'sign-in-tab-activate' },
+          ]}
+          value={mode}
+          onChange={setMode}
+        />
+      </FadeIn>
+
+      <FadeIn delay={staggerDelay(2)}>
+        <Card tone="elevated" style={styles.form}>
+          <Field
+            keyboardType="email-address"
+            label={t('signIn.email')}
+            onChangeText={setEmail}
+            testID="sign-in-email"
+            value={email}
+          />
+          {activating ? (
+            <Field
+              label={t('signIn.code')}
+              onChangeText={setCode}
+              testID="sign-in-code"
+              value={code}
+            />
+          ) : null}
+          <Field
+            label={activating ? t('signIn.newPassword') : t('signIn.password')}
+            onChangeText={setPassword}
+            secure
+            testID="sign-in-password"
+            value={password}
+          />
+
+          {submit.state.status === 'error' ? (
+            <AppText tone="danger" accessibilityRole="alert" testID="sign-in-error">
+              {t(errorMessageKey(submit.state.error))}
+            </AppText>
+          ) : null}
+
+          <Button
+            label={activating ? t('signIn.activate') : t('signIn.submit')}
+            dot
+            disabled={!ready}
+            onPress={submit.run}
+            testID="sign-in-submit"
+          />
+        </Card>
+      </FadeIn>
+
+      <FadeIn delay={staggerDelay(3)} style={styles.language}>
+        <LanguageSwitch />
+      </FadeIn>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  field: { gap: spacing.xs },
-  input: {
-    minHeight: MIN_TOUCH_TARGET,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    paddingHorizontal: spacing.md,
-  },
+  content: { justifyContent: 'center', gap: spacing.lg },
+  brand: { alignItems: 'center', gap: spacing.md },
+  title: { textAlign: 'center' },
+  rule: { alignSelf: 'stretch' },
+  subtitle: { textAlign: 'center', maxWidth: 290 },
+  form: { gap: spacing.md },
+  language: { paddingHorizontal: spacing.sm },
 });

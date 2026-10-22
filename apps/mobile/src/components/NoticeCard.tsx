@@ -16,8 +16,8 @@ export interface NoticeCardProps {
   readonly testID?: string;
 }
 
-const TONE_ICON: Readonly<Record<NonNullable<NoticeCardProps['tone']>, IconName | undefined>> = {
-  neutral: undefined,
+const TONE_ICON: Readonly<Record<NonNullable<NoticeCardProps['tone']>, IconName>> = {
+  neutral: 'sparkle',
   warning: 'alert',
   danger: 'alert',
   success: 'check',
@@ -34,12 +34,11 @@ export function NoticeCard({
 }: NoticeCardProps): ReactElement {
   const theme = useTheme();
   const palette = {
-    neutral: { background: theme.surface, mark: theme.gold, text: theme.text },
-    warning: { background: theme.warningSoft, mark: theme.warning, text: theme.text },
-    danger: { background: theme.dangerSoft, mark: theme.danger, text: theme.text },
-    success: { background: theme.successSoft, mark: theme.success, text: theme.text },
+    neutral: { mark: theme.gold, soft: theme.accentSoft },
+    warning: { mark: theme.warning, soft: theme.warningSoft },
+    danger: { mark: theme.danger, soft: theme.dangerSoft },
+    success: { mark: theme.success, soft: theme.successSoft },
   }[tone];
-  const icon = TONE_ICON[tone];
 
   return (
     <View
@@ -47,48 +46,40 @@ export function NoticeCard({
         styles.card,
         shadows.soft,
         {
-          backgroundColor: palette.background,
-          borderColor: theme.border,
+          backgroundColor: theme.surface,
+          borderColor: tone === 'neutral' ? theme.border : palette.mark,
           shadowColor: theme.shadow,
         },
       ]}
       accessibilityRole={alert ? 'alert' : undefined}
       testID={testID}
     >
-      {/* A slim bar down the start edge: it flips with the layout direction. */}
-      <View style={[styles.bar, { backgroundColor: palette.mark }]} />
-      <View style={styles.content}>
-        <View style={styles.titleRow}>
-          {icon ? (
-            <View style={[styles.badge, { backgroundColor: palette.mark }]}>
-              <Icon name={icon} color={theme.surface} size={16} />
-            </View>
-          ) : null}
-          <AppText variant="heading" style={styles.title}>
-            {title}
-          </AppText>
+      <View style={styles.titleRow}>
+        <View style={[styles.badge, { backgroundColor: palette.soft }]}>
+          <Icon name={TONE_ICON[tone]} color={palette.mark} size={20} />
         </View>
-        {body ? <AppText tone={tone === 'neutral' ? 'textMuted' : 'text'}>{body}</AppText> : null}
-        {children}
+        <AppText variant="heading" style={styles.title}>
+          {title}
+        </AppText>
       </View>
+      {body ? <AppText tone="textMuted">{body}</AppText> : null}
+      {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    flexDirection: 'row',
     borderRadius: radius.xl,
     borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
+    padding: spacing.lg,
+    gap: spacing.md,
   },
-  bar: { width: 5 },
-  content: { flex: 1, padding: spacing.lg, gap: spacing.md },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   badge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },

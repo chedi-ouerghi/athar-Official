@@ -1,21 +1,24 @@
-import type { Table } from '@athar/contracts';
-import { useEffect, useRef, type ReactElement } from 'react';
-import { StyleSheet, View } from 'react-native';
+import type { Table, TableGeometry } from '@athar/contracts';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
 import { DesignCard } from '../../components/DesignCard';
+import { DotRule } from '../../components/DotRule';
 import { ErrorState } from '../../components/ErrorState';
+import { Eyebrow } from '../../components/Eyebrow';
+import { FadeIn, staggerDelay } from '../../components/FadeIn';
 import { LoadingState } from '../../components/LoadingState';
-import { ModeBadge } from '../../components/ModeBadge';
 import { NoticeCard } from '../../components/NoticeCard';
-import { FadeIn } from '../../components/FadeIn';
 import { Screen } from '../../components/Screen';
+import { useReduceMotion } from '../../components/use-reduce-motion';
 import { useTheme } from '../../components/use-theme';
 import { useI18n } from '../../i18n/context';
 import { radius, spacing } from '../../theme';
 import { useDesigns } from '../designs/useDesigns';
+import { storeRecentTable } from '../home/recent-table';
 import { LightControl } from '../light/LightControl';
-import { ShareControl } from '../share/ShareControl';
 import { CONNECTION_LABEL_KEY, capabilitiesOf, classifyTableView } from './table-view';
 import { useTable } from './useTable';
 
@@ -54,6 +57,16 @@ export function TableScreen({
 
     wasActive.current = active;
   }, [active, refreshTable]);
+
+  // Remember the table once it is known to exist, so the home screen can offer it again.
+  const knownId = table.state.status === 'ready' ? table.state.data.id : undefined;
+  const knownName = table.state.status === 'ready' ? table.state.data.displayName : undefined;
+
+  useEffect(() => {
+    if (knownId !== undefined && knownName !== undefined) {
+      storeRecentTable({ id: knownId, name: knownName });
+    }
+  }, [knownId, knownName]);
 
   const view = classifyTableView(table.state);
 
@@ -137,10 +150,15 @@ export function TableScreen({
         </NoticeCard>
       ) : null}
 
-      {view === 'ready' ? <DesignList onOpenDesign={onOpenDesign} /> : null}
+      {capabilities.light && view !== 'disabled' ? (
+        <FadeIn delay={staggerDelay(1)}>
+          <LightControl tableId={data.id} />
+        </FadeIn>
+      ) : null}
 
-      {capabilities.light && view !== 'disabled' ? <LightControl tableId={data.id} /> : null}
-      {capabilities.share ? <ShareControl tableId={data.id} /> : null}
+      {view === 'ready' ? (
+        <DesignList geometry={data.geometry} onOpenDesign={onOpenDesign} />
+      ) : null}
     </Screen>
   );
 }
@@ -157,11 +175,62 @@ function WatchButton({
   return (
     <Button
       label={t('table.watch')}
+      icon="play"
       onPress={() => {
         onWatchJob(jobId);
       }}
       testID="table-watch"
     />
+  );
+}
+
+/** A dot that breathes while the table is ready, so "live" looks live. */
+function StatusDot({ live }: { readonly live: boolean }): ReactElement {
+  const theme = useTheme();
+  const reduceMotion = useReduceMotion();
+  const [pulse] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    if (!live || reduceMotion) {
+      pulse.setValue(0);
+      return undefined;
+    }
+
+    const loop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1600,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+
+    return () => {
+      loop.stop();
+    };
+  }, [live, pulse, reduceMotion]);
+
+  const colour = live ? theme.success : theme.warning;
+
+  return (
+    <View style={styles.dotBox}>
+      {live ? (
+        <Animated.View
+          style={[
+            styles.halo,
+            {
+              backgroundColor: colour,
+              opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
+              transform: [
+                { scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.6] }) },
+              ],
+            },
+          ]}
+        />
+      ) : null}
+      <View style={[styles.dot, { backgroundColor: colour }]} />
+    </View>
   );
 }
 
@@ -171,34 +240,53 @@ function TableHeader({ table }: { readonly table: Table }): ReactElement {
   const live = table.enabled && table.connection === 'online';
 
   return (
-    <FadeIn style={styles.header}>
-      <ModeBadge mode={table.mode} testID="table-mode" />
-      <AppText variant="display">{table.displayName}</AppText>
-      <AppText tone="textMuted">{table.location}</AppText>
-      <View style={[styles.status, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={[styles.dot, { backgroundColor: live ? theme.success : theme.warning }]} />
-        <AppText variant="label" tone="accentText" testID="table-connection">
-          {`${t('table.status')}: ${t(table.enabled ? CONNECTION_LABEL_KEY[table.connection] : 'table.connection.disabled')}`}
+    <FadeIn>
+      <Card tone="glow" style={styles.header}>
+        <View style={styles.headerTop}>
+          <View
+            style={[
+              styles.status,
+              { backgroundColor: theme.surfaceMuted, borderColor: theme.border },
+            ]}
+          >
+            <StatusDot live={live} />
+            <AppText variant="label" tone="accentText" testID="table-connection">
+              {`${t('table.status')}: ${t(table.enabled ? CONNECTION_LABEL_KEY[table.connection] : 'table.connection.disabled')}`}
+            </AppText>
+          </View>
+        </View>
+
+        <AppText variant="display" numberOfLines={2}>
+          {table.displayName}
         </AppText>
-      </View>
+        <AppText tone="textMuted">{table.location}</AppText>
+        <DotRule />
+      </Card>
     </FadeIn>
   );
 }
 
 function DesignList({
+  geometry,
   onOpenDesign,
 }: {
+  readonly geometry: TableGeometry;
   readonly onOpenDesign: (designId: string) => void;
 }): ReactElement {
   const { t } = useI18n();
-  const theme = useTheme();
   const designs = useDesigns();
 
   return (
     <View style={styles.designs}>
       <View style={styles.sectionHeading}>
-        <View style={[styles.sectionRule, { backgroundColor: theme.gold }]} />
-        <AppText variant="heading">{t('table.designsTitle')}</AppText>
+        <AppText variant="heading" style={styles.sectionTitle}>
+          {t('table.designsTitle')}
+        </AppText>
+        {designs.state.status === 'ready' ? (
+          <Eyebrow>
+            {t('table.designsCount', { count: String(designs.state.data.designs.length) })}
+          </Eyebrow>
+        ) : null}
       </View>
 
       {designs.state.status === 'loading' ? <LoadingState testID="designs-loading" /> : null}
@@ -209,9 +297,10 @@ function DesignList({
 
       {designs.state.status === 'ready'
         ? designs.state.data.designs.map((design, index) => (
-            <FadeIn key={design.id} delay={index * 90}>
+            <FadeIn key={design.id} delay={staggerDelay(index, 160)}>
               <DesignCard
                 design={design}
+                geometry={geometry}
                 onPress={() => {
                   onOpenDesign(design.id);
                 }}
@@ -225,7 +314,14 @@ function DesignList({
 }
 
 const styles = StyleSheet.create({
-  header: { gap: spacing.sm, alignItems: 'flex-start', paddingTop: spacing.sm },
+  header: { gap: spacing.sm },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   status: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -234,10 +330,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 1,
-    marginTop: spacing.xs,
   },
+  dotBox: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  designs: { gap: spacing.md, marginTop: spacing.md },
-  sectionHeading: { gap: spacing.sm },
-  sectionRule: { width: 32, height: 3, borderRadius: 2 },
+  halo: { position: 'absolute', width: 8, height: 8, borderRadius: 4 },
+  designs: { gap: spacing.md, marginTop: spacing.sm },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sectionTitle: { flex: 1 },
 });

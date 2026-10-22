@@ -2,107 +2,145 @@ import { useState, type ReactElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { DotRule } from '../../components/DotRule';
 import { EnterCodeForm } from '../../components/EnterCodeForm';
-import { FadeIn } from '../../components/FadeIn';
-import { LanguageSwitch } from '../../components/LanguageSwitch';
+import { Eyebrow } from '../../components/Eyebrow';
+import { FadeIn, staggerDelay } from '../../components/FadeIn';
+import { Headline } from '../../components/Headline';
+import { Icon } from '../../components/Icon';
 import { Ornament } from '../../components/Ornament';
 import { Screen } from '../../components/Screen';
 import { useTheme } from '../../components/use-theme';
 import { useI18n } from '../../i18n/context';
-import { spacing } from '../../theme';
+import { EYEBROW_TRACKING, spacing } from '../../theme';
+import type { RecentTable } from './recent-table';
 
 export interface HomeScreenProps {
   readonly allowedHosts: readonly string[];
+  /** The signed-in person's name, for the greeting. Empty when unknown. */
+  readonly name: string;
+  /** The last table they opened, offered as a way back in. */
+  readonly recent: RecentTable | undefined;
   readonly onScan: () => void;
   readonly onTable: (tableId: string) => void;
-  readonly onDiagnostics: () => void;
-  readonly onSignOut: () => void | Promise<unknown>;
+  readonly onPairing: (link: { readonly tableId: string; readonly token: string }) => void;
 }
 
-/** Wordmark tracking, in px. Applied to the Latin name only: tracking breaks Arabic joins. */
-const WORDMARK_TRACKING = 10;
-
-/** The front door: scan a table, or type its code. */
+/** The front door: a greeting, the way to a table, and the way back to the last one. */
 export function HomeScreen({
   allowedHosts,
+  name,
+  recent,
   onScan,
   onTable,
-  onDiagnostics,
-  onSignOut,
+  onPairing,
 }: HomeScreenProps): ReactElement {
-  const { t } = useI18n();
+  const { t, isRtl } = useI18n();
   const theme = useTheme();
   const [typing, setTyping] = useState(false);
 
   return (
-    <Screen testID="home-screen">
-      <View style={styles.hero}>
-        <View style={styles.ornament}>
-          <Ornament size={250} strength={0.4} />
-        </View>
-
-        <FadeIn style={styles.brand}>
-          <View style={[styles.rule, { backgroundColor: theme.gold }]} />
-          <AppText
-            variant="hero"
-            accessibilityRole="header"
-            style={{ letterSpacing: WORDMARK_TRACKING }}
-          >
+    <Screen tabBar testID="home-screen">
+      <FadeIn style={styles.top}>
+        <View style={styles.brand}>
+          <AppText variant="label" style={{ letterSpacing: EYEBROW_TRACKING * 2.5 }}>
             ATHAR
           </AppText>
           {/* The name in Arabic, set with no tracking so its letters stay joined. */}
-          <AppText variant="title" tone="accentText">
+          <AppText variant="label" tone="accentText">
             أثر
           </AppText>
+        </View>
+        <DotRule />
+      </FadeIn>
+
+      <FadeIn delay={staggerDelay(1)} style={styles.greeting}>
+        <Eyebrow accent>{t('home.greeting')}</Eyebrow>
+        {name !== '' ? (
+          <AppText variant="display" numberOfLines={2} testID="home-name">
+            {name}
+          </AppText>
+        ) : null}
+      </FadeIn>
+
+      <FadeIn delay={staggerDelay(2)}>
+        <Card tone="glow" style={styles.hero}>
+          <View style={styles.ornament}>
+            <Ornament size={150} strength={0.4} />
+          </View>
+
+          <Headline variant="title" style={styles.heroTitle}>
+            {t('home.heroTitle')}
+          </Headline>
           <AppText tone="textMuted" style={styles.tagline}>
             {t('home.tagline')}
           </AppText>
-        </FadeIn>
-      </View>
 
-      <FadeIn delay={160} style={styles.actions}>
-        <Button label={t('home.scan')} onPress={onScan} testID="home-scan" />
+          <View style={styles.actions}>
+            <Button label={t('home.scan')} dot onPress={onScan} testID="home-scan" />
 
-        {typing ? (
-          <EnterCodeForm allowedHosts={allowedHosts} onTable={onTable} autoFocus />
-        ) : (
-          <Button
-            label={t('home.enterCode')}
-            variant="secondary"
+            {typing ? (
+              <EnterCodeForm allowedHosts={allowedHosts} onPairing={onPairing} autoFocus />
+            ) : (
+              <Button
+                label={t('home.enterCode')}
+                variant="secondary"
+                onPress={() => {
+                  setTyping(true);
+                }}
+                testID="home-enter-code"
+              />
+            )}
+          </View>
+        </Card>
+      </FadeIn>
+
+      {recent !== undefined ? (
+        <FadeIn delay={staggerDelay(3)}>
+          <Card
             onPress={() => {
-              setTyping(true);
+              onTable(recent.id);
             }}
-            testID="home-enter-code"
-          />
-        )}
-      </FadeIn>
-
-      <FadeIn delay={300} style={styles.footer}>
-        <LanguageSwitch />
-        <Button
-          label={t('home.diagnostics')}
-          variant="ghost"
-          onPress={onDiagnostics}
-          testID="home-diagnostics"
-        />
-        <Button
-          label={t('home.signOut')}
-          variant="ghost"
-          onPress={onSignOut}
-          testID="home-sign-out"
-        />
-      </FadeIn>
+            accessibilityLabel={`${t('home.recentOpen')}: ${recent.name}`}
+            testID="home-recent"
+          >
+            <View style={styles.recent}>
+              <View style={[styles.recentIcon, { borderColor: theme.gold }]}>
+                <Icon name="table" color={theme.gold} size={22} />
+              </View>
+              <View style={styles.recentText}>
+                <Eyebrow>{t('home.recent')}</Eyebrow>
+                <AppText variant="heading" numberOfLines={1}>
+                  {recent.name}
+                </AppText>
+              </View>
+              <Icon name="chevron" color={theme.textMuted} size={20} mirror={isRtl} />
+            </View>
+          </Card>
+        </FadeIn>
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: { minHeight: 300, justifyContent: 'center', paddingTop: spacing.xl },
-  // Behind the wordmark, pushed to the end edge so the text stays on clean sand.
-  ornament: { position: 'absolute', top: -30, end: -125 },
-  brand: { gap: spacing.xs, alignItems: 'flex-start' },
-  rule: { width: 44, height: 3, borderRadius: 2, marginBottom: spacing.md },
-  tagline: { marginTop: spacing.sm, maxWidth: 230 },
-  actions: { gap: spacing.md },
-  footer: { gap: spacing.md, marginTop: spacing.lg },
+  top: { gap: spacing.md, paddingTop: spacing.sm },
+  brand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  greeting: { gap: spacing.sm },
+  hero: { gap: spacing.md },
+  ornament: { position: 'absolute', top: spacing.sm, end: spacing.sm },
+  heroTitle: { maxWidth: '82%' },
+  tagline: { maxWidth: '86%' },
+  actions: { gap: spacing.md, marginTop: spacing.md },
+  recent: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  recentIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recentText: { flex: 1, gap: 2 },
 });

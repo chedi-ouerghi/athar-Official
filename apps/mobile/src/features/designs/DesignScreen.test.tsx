@@ -35,51 +35,21 @@ function setup(
 }
 
 describe('DesignScreen', () => {
-  it('shows the preview, title, description, duration and the Simulation badge', async () => {
+  it('shows the preview, title, description, duration and no inspiration card', async () => {
     setup(jest.fn<StartJob>());
 
     expect(await screen.findByText('Design dunes')).toBeTruthy();
     expect(screen.getByText('About dunes.')).toBeTruthy();
     expect(screen.getByTestId('design-preview')).toBeTruthy();
-    expect(screen.getByTestId('design-mode')).toBeTruthy();
-    expect(screen.getByText('Simulation')).toBeTruthy();
+    expect(screen.queryByTestId('design-inspiration-label')).toBeNull();
     expect(screen.getByTestId('design-duration').props.children).toBe('About 3 min');
     expect(screen.getByText('Start drawing')).toBeTruthy();
   });
 
-  it('labels an original design "Modern interpretation", with its note and no sources', async () => {
-    setup(jest.fn<StartJob>());
-
-    expect((await screen.findByTestId('design-inspiration-label')).props.children).toBe(
-      'Modern interpretation',
-    );
-    expect(screen.getByText('An original interpretation.')).toBeTruthy();
-    expect(screen.queryByText('Sources')).toBeNull();
-  });
-
-  it('labels a documented design "Traditional inspiration" and lists its sources', async () => {
-    const detail = design('sadu', {
-      inspiration: {
-        kind: 'documented-traditional',
-        note: { en: 'Woven bands.', ar: 'أشرطة منسوجة.' },
-        sources: [{ label: 'Museum catalogue, p. 12' }],
-      },
-    });
-    setup(jest.fn<StartJob>(), { detail });
-
-    expect((await screen.findByTestId('design-inspiration-label')).props.children).toBe(
-      'Traditional inspiration',
-    );
-    expect(screen.getByText('Sources')).toBeTruthy();
-    expect(screen.getByText('Museum catalogue, p. 12')).toBeTruthy();
-  });
-
-  it('shows the Arabic title, note and label in Arabic', async () => {
+  it('shows the Arabic title and button in Arabic', async () => {
     setup(jest.fn<StartJob>(), { locale: 'ar' });
 
     expect(await screen.findByText('تصميم dunes')).toBeTruthy();
-    expect(screen.getByText('تفسير أصلي.')).toBeTruthy();
-    expect(screen.getByText('تفسير حديث')).toBeTruthy();
     expect(screen.getByText('ابدأ الرسم')).toBeTruthy();
   });
 

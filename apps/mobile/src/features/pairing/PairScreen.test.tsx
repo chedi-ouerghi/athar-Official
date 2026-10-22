@@ -44,6 +44,10 @@ describe('PairScreen', () => {
       'TABLE_ALREADY_CLAIMED',
       'This table already belongs to someone else. Ask its owner to invite you.',
     ],
+    [
+      'PAIRING_WRONG_ACCOUNT',
+      'This code was made for a different account. Sign in with the account it was made for.',
+    ],
   ];
 
   it.each(refusals)(
@@ -55,6 +59,28 @@ describe('PairScreen', () => {
       expect(onPaired).not.toHaveBeenCalled();
     },
   );
+
+  it('for a code made for another account, offers to sign out instead of trying again', async () => {
+    const onSignOut = jest.fn<() => void>();
+    const pair = jest.fn(() => Promise.reject(apiError('PAIRING_WRONG_ACCOUNT', 403)));
+
+    renderWithApp(
+      <PairScreen
+        tableId={TABLE_ID}
+        token={TOKEN}
+        onPaired={jest.fn()}
+        onScanAnother={jest.fn()}
+        onSignOut={onSignOut}
+      />,
+      stubClient({ pairTable: pair as never }),
+    );
+
+    fireEvent.press(await screen.findByTestId('pair-sign-out'));
+
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('pair-error-retry')).toBeNull();
+    expect(pair).toHaveBeenCalledTimes(1);
+  });
 
   it('tries again only when the user asks', async () => {
     const calls = jest

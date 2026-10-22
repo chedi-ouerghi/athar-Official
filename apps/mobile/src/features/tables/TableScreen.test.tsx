@@ -35,12 +35,11 @@ describe('TableScreen', () => {
     expect(screen.getByTestId('table-loading')).toBeTruthy();
   });
 
-  it('shows the table, the Simulation badge, its status in plain words, and the four designs', async () => {
+  it('shows the table, its status in plain words, and the four designs', async () => {
     const handlers = setup(() => Promise.resolve(table()));
 
     expect(await screen.findByText('Main hall')).toBeTruthy();
     expect(screen.getByText('Ground floor')).toBeTruthy();
-    expect(screen.getByText('Simulation')).toBeTruthy();
     expect(screen.getByTestId('table-connection').props.children).toBe('Status: Ready to draw');
 
     for (const id of ['dunes', 'khoos', 'sadu', 'star']) {
@@ -60,13 +59,6 @@ describe('TableScreen', () => {
       expect(screen.getByTestId('design-dunes-preview-full')).toBeTruthy();
     });
     expect(String(screen.getByTestId('design-dunes-preview-full').props.d)).toMatch(/^M/);
-  });
-
-  it('shows the badge as fail-closed when the mode is not one we know', async () => {
-    setup(() => Promise.resolve(table({ mode: 'weird' as never })));
-
-    expect(await screen.findByText('Unknown mode')).toBeTruthy();
-    expect(screen.queryByText('Simulation')).toBeNull();
   });
 
   it('explains an unknown table, and offers to scan another code', async () => {
@@ -200,7 +192,6 @@ describe('TableScreen', () => {
   it('is written in Arabic, with the Arabic design titles', async () => {
     setup(() => Promise.resolve(table()), { locale: 'ar' });
 
-    expect(await screen.findByText('محاكاة')).toBeTruthy();
     expect(await screen.findByText('تصميم dunes')).toBeTruthy();
     expect(screen.getByText('اختر تصميمًا')).toBeTruthy();
   });
@@ -214,25 +205,24 @@ describe('TableScreen: what each role is shown', () => {
       access: { role },
     });
 
-  it('shows an owner the light and the invitation', async () => {
+  it('shows an owner the light', async () => {
     setup(() => Promise.resolve(personalized('owner')));
 
     expect(await screen.findByTestId('light-control')).toBeTruthy();
-    expect(screen.getByTestId('share-control')).toBeTruthy();
+    expect(screen.queryByTestId('share-control')).toBeNull();
   });
 
-  it('shows a guest the light but no way to invite anyone', async () => {
+  it('shows a guest the light', async () => {
     setup(() => Promise.resolve(personalized('guest')));
 
     expect(await screen.findByTestId('light-control')).toBeTruthy();
     expect(screen.queryByTestId('share-control')).toBeNull();
-    expect(screen.queryByTestId('share-create')).toBeNull();
   });
 
   it('offers no light when the plan does not include it', async () => {
     setup(() => Promise.resolve(table({ access: { role: 'owner' } })));
 
-    expect(await screen.findByTestId('share-control')).toBeTruthy();
+    expect(await screen.findByTestId('table-screen')).toBeTruthy();
     expect(screen.queryByTestId('light-control')).toBeNull();
   });
 });

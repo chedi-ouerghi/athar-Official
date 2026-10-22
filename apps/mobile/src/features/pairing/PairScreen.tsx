@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactElement } from 'react';
+import { ApiError } from '../../api/http-client';
 import { Button } from '../../components/Button';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
@@ -12,6 +13,11 @@ export interface PairScreenProps {
   /** The pairing worked; `tableId` is the one the server confirmed. */
   readonly onPaired: (tableId: string) => void;
   readonly onScanAnother: () => void;
+  /**
+   * Leave this account. Offered when the code was made for another account: trying
+   * again cannot help, signing in with the right one can.
+   */
+  readonly onSignOut?: () => void | Promise<unknown>;
 }
 
 /**
@@ -24,6 +30,7 @@ export function PairScreen({
   token,
   onPaired,
   onScanAnother,
+  onSignOut,
 }: PairScreenProps): ReactElement {
   const { t } = useI18n();
   const pair = usePairTable();
@@ -48,9 +55,20 @@ export function PairScreen({
   }, []);
 
   if (pair.state.status === 'error') {
+    // The code is for another customer: it is not spent, but this account can never use it.
+    const wrongAccount =
+      pair.state.error instanceof ApiError && pair.state.error.code === 'PAIRING_WRONG_ACCOUNT';
+
     return (
       <Screen testID="pair-error-screen">
-        <ErrorState error={pair.state.error} onRetry={redeem} testID="pair-error" />
+        <ErrorState
+          error={pair.state.error}
+          onRetry={wrongAccount ? undefined : redeem}
+          testID="pair-error"
+        />
+        {wrongAccount && onSignOut !== undefined ? (
+          <Button label={t('home.signOut')} onPress={onSignOut} testID="pair-sign-out" />
+        ) : null}
         <Button
           label={t('table.scanAnother')}
           variant="ghost"

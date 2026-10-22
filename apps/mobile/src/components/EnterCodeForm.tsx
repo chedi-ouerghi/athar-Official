@@ -1,74 +1,59 @@
 import { useState, type ReactElement } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useI18n } from '../i18n/context';
-import { parseTableCode } from '../linking/parse-table-code';
-import { MIN_TOUCH_TARGET, radius, spacing, typography } from '../theme';
+import { parsePairingQr, type PairingQr } from '../linking/parse-pairing-qr';
+import { spacing } from '../theme';
 import { AppText } from './AppText';
 import { Button } from './Button';
-import { useTheme } from './use-theme';
+import { Field } from './Field';
 
 export interface EnterCodeFormProps {
   /** Hosts whose HTTPS links are accepted (`environment.tableLinkHosts`). */
   readonly allowedHosts: readonly string[];
-  /** Called with a table id that passed the same validation as a scanned code. */
-  readonly onTable: (tableId: string) => void;
+  /** A pairing link (a claim or an invitation) was typed or pasted. */
+  readonly onPairing: (link: PairingQr) => void;
   readonly autoFocus?: boolean;
 }
 
 /**
- * The typed alternative to scanning: a table id, or a whole link pasted in. It
+ * The typed alternative to scanning: the pairing link of the table, pasted in. It
  * goes through the same parser as the scanner, so both accept exactly the same
- * codes.
+ * links, and a bare table id opens nothing.
  */
 export function EnterCodeForm({
   allowedHosts,
-  onTable,
+  onPairing,
   autoFocus = false,
 }: EnterCodeFormProps): ReactElement {
   const { t } = useI18n();
-  const theme = useTheme();
   const [value, setValue] = useState('');
   const [invalid, setInvalid] = useState(false);
 
   const submit = () => {
-    const parsed = parseTableCode(value, { allowedHosts });
+    const pairing = parsePairingQr(value, { allowedHosts });
 
-    if (parsed.tableId === undefined) {
+    if (pairing === null) {
       setInvalid(true);
       return;
     }
 
     setInvalid(false);
-    onTable(parsed.tableId);
+    onPairing(pairing);
   };
 
   return (
     <View style={styles.container}>
-      <AppText variant="label" tone="textMuted">
-        {t('code.label')}
-      </AppText>
-      <TextInput
-        accessibilityLabel={t('code.label')}
-        autoCapitalize="none"
-        autoCorrect={false}
+      <Field
         autoFocus={autoFocus}
+        invalid={invalid}
+        label={t('code.label')}
         onChangeText={(text) => {
           setValue(text);
           setInvalid(false);
         }}
         onSubmitEditing={submit}
         placeholder={t('code.placeholder')}
-        placeholderTextColor={theme.textMuted}
         returnKeyType="go"
-        style={[
-          styles.input,
-          typography.body,
-          {
-            color: theme.text,
-            backgroundColor: theme.surface,
-            borderColor: invalid ? theme.danger : theme.border,
-          },
-        ]}
         testID="code-input"
         value={value}
       />
@@ -84,10 +69,4 @@ export function EnterCodeForm({
 
 const styles = StyleSheet.create({
   container: { gap: spacing.sm },
-  input: {
-    minHeight: MIN_TOUCH_TARGET,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    paddingHorizontal: spacing.md,
-  },
 });

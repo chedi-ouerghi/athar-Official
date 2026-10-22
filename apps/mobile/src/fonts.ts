@@ -8,13 +8,23 @@
  * `assets/fonts/OFL.txt`.
  */
 
+import { IBMPlexSansArabic_300Light } from '@expo-google-fonts/ibm-plex-sans-arabic/300Light';
 import { IBMPlexSansArabic_400Regular } from '@expo-google-fonts/ibm-plex-sans-arabic/400Regular';
 import { IBMPlexSansArabic_500Medium } from '@expo-google-fonts/ibm-plex-sans-arabic/500Medium';
 import { IBMPlexSansArabic_600SemiBold } from '@expo-google-fonts/ibm-plex-sans-arabic/600SemiBold';
 import { IBMPlexSansArabic_700Bold } from '@expo-google-fonts/ibm-plex-sans-arabic/700Bold';
-import { fontFamily } from './theme';
+import { InstrumentSerif_400Regular } from '@expo-google-fonts/instrument-serif/400Regular';
+import { InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif/400Regular_Italic';
+import { fontFamily, serifFamily } from './theme';
 
+/**
+ * Instrument Serif (SIL Open Font License 1.1) is the serif of the website's
+ * headlines, used for Latin headlines only: it has no Arabic glyphs.
+ */
 export const fontSources = {
+  [serifFamily.regular]: InstrumentSerif_400Regular,
+  [serifFamily.italic]: InstrumentSerif_400Regular_Italic,
+  [fontFamily.light]: IBMPlexSansArabic_300Light,
   [fontFamily.regular]: IBMPlexSansArabic_400Regular,
   [fontFamily.medium]: IBMPlexSansArabic_500Medium,
   [fontFamily.semibold]: IBMPlexSansArabic_600SemiBold,
