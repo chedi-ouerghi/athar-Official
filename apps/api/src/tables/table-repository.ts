@@ -20,7 +20,14 @@ export type TableRecord = AdminTable;
 export type TablePatch = Partial<
   Pick<
     TableRecord,
-    'displayName' | 'location' | 'enabled' | 'ownerAccountId' | 'plan' | 'voiceAssistant'
+    | 'displayName'
+    | 'location'
+    | 'enabled'
+    | 'ownerAccountId'
+    | 'reservedForAccountId'
+    | 'plan'
+    | 'voiceAssistant'
+    | 'geometry'
   >
 > & {
   readonly updatedAt: string;
@@ -64,8 +71,13 @@ export function applyPatch(record: TableRecord, patch: TablePatch): TableRecord 
     // `null` is a value here (no owner), so only `undefined` means "leave alone".
     ownerAccountId:
       patch.ownerAccountId === undefined ? record.ownerAccountId : patch.ownerAccountId,
+    // Only written when the patch names it, so a record without the field keeps no key for it.
+    ...(patch.reservedForAccountId === undefined
+      ? {}
+      : { reservedForAccountId: patch.reservedForAccountId }),
     plan: patch.plan ?? record.plan,
     voiceAssistant: patch.voiceAssistant ?? record.voiceAssistant,
+    geometry: patch.geometry ?? record.geometry,
     updatedAt: patch.updatedAt,
   };
 }

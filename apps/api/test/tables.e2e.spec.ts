@@ -58,6 +58,7 @@ describe('tables over HTTP', () => {
         activeJobId: null,
         plan: 'basic',
         voiceAssistant: false,
+        geometry: { shape: 'rectangle', widthMm: 1200, heightMm: 800 },
         features: ['catalogue', 'rake'],
         ambienceId: null,
         // Not paired yet, so it cannot start.

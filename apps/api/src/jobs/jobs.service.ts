@@ -36,6 +36,7 @@ import {
   type JobErrorCode,
   type JobTrigger,
   type StartJobRequest,
+  type TableGeometry,
 } from '@athar/contracts';
 import type { Authenticated } from '../auth/auth.service.js';
 import { DomainException } from '../common/http/domain.exception.js';
@@ -250,7 +251,7 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
       );
       this.listenTo(tableId);
 
-      return { job: await this.hand(job, plan), created: true };
+      return { job: await this.hand(job, plan, table.geometry), created: true };
     });
   }
 
@@ -267,9 +268,13 @@ export class JobsService implements ActiveJobLookup, OnModuleDestroy {
   }
 
   /** Give a queued job to the driver, and settle what happens next. */
-  private async hand(job: DrawingJob, plan: DrawingPlan): Promise<DrawingJob> {
+  private async hand(
+    job: DrawingJob,
+    plan: DrawingPlan,
+    geometry: TableGeometry,
+  ): Promise<DrawingJob> {
     try {
-      await this.driver.startJob(job.tableId, { jobId: job.id, ...plan });
+      await this.driver.startJob(job.tableId, { jobId: job.id, ...plan, geometry });
     } catch (error) {
       if (error instanceof DriverError) {
         return this.fail(job, error.code, `the driver refused it (${error.code})`);

@@ -45,6 +45,7 @@ import {
   type DevicePresence,
   type DeviceStatusMessage,
   type Light,
+  type TableGeometry,
 } from '@athar/contracts';
 import {
   DriverError,
@@ -94,6 +95,7 @@ type CommandBody =
       type: 'start';
       jobId: string;
       trajectory: DriverStartRequest['trajectory'];
+      geometry?: TableGeometry;
       estimatedDurationSeconds?: number;
     }
   | { type: 'pause' | 'resume' | 'stop'; jobId: string }
@@ -157,6 +159,7 @@ export class MqttTableDriver implements TableDriver {
       type: 'start',
       jobId: request.jobId,
       trajectory: request.trajectory,
+      ...(request.geometry === undefined ? {} : { geometry: request.geometry }),
       ...(request.estimatedDurationSeconds === undefined
         ? {}
         : { estimatedDurationSeconds: request.estimatedDurationSeconds }),

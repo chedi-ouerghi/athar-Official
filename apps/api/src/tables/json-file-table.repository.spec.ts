@@ -111,7 +111,7 @@ describe('JsonFileTableRepository', () => {
   });
 
   describe('a file written before orders existed', () => {
-    // Exactly what commit 0965207 wrote: no ownerAccountId, plan or voiceAssistant.
+    // Exactly what commit 0965207 wrote: no ownerAccountId, plan, voiceAssistant or geometry.
     const OLD_FORMAT = `{
   "version": 1,
   "tables": [
@@ -140,6 +140,8 @@ describe('JsonFileTableRepository', () => {
           ownerAccountId: null,
           plan: 'basic',
           voiceAssistant: false,
+          // The placeholder: an old file has no size, and must still load.
+          geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
@@ -161,6 +163,7 @@ describe('JsonFileTableRepository', () => {
         ownerAccountId: null,
         plan: 'personalized',
         voiceAssistant: false,
+        geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
       });
     });
   });

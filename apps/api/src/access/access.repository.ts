@@ -40,7 +40,16 @@ const tokenFields = {
   revokedAt: z.string().nullable(),
 };
 
-const claimRecordSchema = z.object({ kind: z.literal('claim'), ...tokenFields });
+const claimRecordSchema = z.object({
+  kind: z.literal('claim'),
+  ...tokenFields,
+  /**
+   * The one account that may redeem it: a claim code is for one table and one
+   * customer. `null` on a code issued before codes were bound to a customer, which
+   * no account can redeem any more.
+   */
+  accountId: z.string().min(1).nullable().default(null),
+});
 const shareRecordSchema = z.object({ kind: z.literal('share'), ...tokenFields });
 const guestRecordSchema = z.object({
   kind: z.literal('guest'),
@@ -86,6 +95,8 @@ export type RedeemOutcome =
   | { readonly outcome: 'invalid' }
   /** A valid claim token, but the table already has an owner. */
   | { readonly outcome: 'already-claimed' }
+  /** A valid claim token for another customer's account. Nothing is spent. */
+  | { readonly outcome: 'wrong-account' }
   /** The claim token is now used; the caller must make the account the owner. */
   | { readonly outcome: 'claimed'; readonly tokenId: string }
   | { readonly outcome: 'guest'; readonly tokenId: string; readonly expiresAt: string };
@@ -240,6 +251,16 @@ export class TableAccessRepository {
       if (token.kind === 'claim') {
         if (!input.ownerless) {
           return { result: { outcome: 'already-claimed' } };
+        }
+
+        // A code with no customer (issued before they were bound) can be redeemed by nobody.
+        if (token.accountId === null) {
+          return { result: { outcome: 'invalid' } };
+        }
+
+        // Decided before anything is spent: the right customer can still use the code.
+        if (token.accountId !== input.accountId) {
+          return { result: { outcome: 'wrong-account' } };
         }
 
         return { next: spend(records, token), result: { outcome: 'claimed', tokenId: token.id } };

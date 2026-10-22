@@ -10,8 +10,8 @@ describe('newMqttCredentials', () => {
       host: 'broker.example.com',
       port: 8884,
       tls: true,
-      username: 't-table-abc',
-      clientId: 't-table-abc',
+      username: 'table-abc',
+      clientId: 'table-abc',
     });
     expect(mqttCredentialsSchema.safeParse(credentials).success).toBe(true);
   });

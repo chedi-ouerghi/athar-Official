@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import {
+  claimTokenRequestSchema,
   createTableRequestSchema,
   provisionTableRequestSchema,
   tableParamsSchema,
   updateTableRequestSchema,
   type AdminTable,
+  type ClaimTokenRequest,
   type ClaimTokenResponse,
   type ListAdminTablesResponse,
   type ProvisionTableResponse,
@@ -12,7 +14,7 @@ import {
   type TableQrResponse,
   type UpdateTableRequest,
 } from '@athar/contracts';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { AccessService } from '../access/access.service.js';
 import { newMqttCredentials } from '../access/mqtt-credentials.js';
 import { CustomersService } from '../auth/customers.service.js';
@@ -21,6 +23,9 @@ import { SessionGuard, Roles } from '../auth/session.guard.js';
 import { DomainException } from '../common/http/domain.exception.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
 import { TableRegistry } from './table-registry.service.js';
+
+/** A request with no body at all counts as `{}`: the customer then comes from the table. */
+const claimTokenBodySchema = z.preprocess((body) => body ?? {}, claimTokenRequestSchema);
 
 /**
  * Table provisioning, `/api/v1/admin/tables`.
@@ -50,24 +55,48 @@ export class AdminTablesController {
     @Body(new ZodValidationPipe(provisionTableRequestSchema))
     body: z.output<typeof provisionTableRequestSchema>,
   ): Promise<ProvisionTableResponse> {
-    const table = await this.registry.create(body);
+    const { customerAccountId, ...fields } = body;
+    await this.checkCustomer(customerAccountId, 'customerAccountId');
+
+    const table = await this.registry.create({
+      ...fields,
+      reservedForAccountId: customerAccountId,
+    });
 
     return {
       table,
       mqtt: newMqttCredentials(table.id, this.config.mqtt.url),
-      pairing: await this.access.issueClaim(table.id),
+      pairing: await this.access.issueClaim(table.id, customerAccountId),
     };
   }
 
   /**
    * A new claim code for a table nobody owns yet, for a printed code that expired
-   * in stock. The earlier code stops working.
+   * in stock. The earlier code stops working. It is for the customer the table was
+   * provisioned for, unless the body names another one (and a table made before codes
+   * were bound to a customer must).
    */
   @Post(':tableId/claim-token')
   async claimToken(
     @Param(new ZodValidationPipe(tableParamsSchema, 'params')) params: TableParams,
+    @Body(new ZodValidationPipe(claimTokenBodySchema)) body: ClaimTokenRequest,
   ): Promise<ClaimTokenResponse> {
-    return { tableId: params.tableId, pairing: await this.access.issueClaim(params.tableId) };
+    const table = await this.registry.get(params.tableId);
+    const customerAccountId = body.customerAccountId ?? table.reservedForAccountId ?? undefined;
+
+    if (customerAccountId === undefined) {
+      throw new DomainException(
+        'VALIDATION_FAILED',
+        'customerAccountId is required: this table was not provisioned for a customer.',
+      );
+    }
+
+    await this.checkCustomer(customerAccountId, 'customerAccountId');
+
+    return {
+      tableId: params.tableId,
+      pairing: await this.access.issueClaim(params.tableId, customerAccountId),
+    };
   }
 
   /** Register a table. The server generates the id; the caller cannot choose it. */
@@ -116,14 +145,17 @@ export class AdminTablesController {
    * is the caller's mistake, so `VALIDATION_FAILED` on `body.ownerAccountId`.
    */
   private async checkOwner(ownerAccountId: string | null | undefined): Promise<void> {
-    if (
-      ownerAccountId !== null &&
-      ownerAccountId !== undefined &&
-      !(await this.customers.isAssignableOwner(ownerAccountId))
-    ) {
+    if (ownerAccountId !== null && ownerAccountId !== undefined) {
+      await this.checkCustomer(ownerAccountId, 'ownerAccountId');
+    }
+  }
+
+  /** `field` must be the id of an existing, non-disabled customer account. */
+  private async checkCustomer(accountId: string, field: string): Promise<void> {
+    if (!(await this.customers.isAssignableOwner(accountId))) {
       throw new DomainException(
         'VALIDATION_FAILED',
-        'ownerAccountId must be the id of an existing, non-disabled customer account.',
+        `${field} must be the id of an existing, non-disabled customer account.`,
       );
     }
   }

@@ -64,6 +64,7 @@ function acknowledge(
 const startRequest: DriverStartRequest = {
   jobId: randomUUID(),
   estimatedDurationSeconds: 600,
+  geometry: { shape: 'oval', widthMm: 1000, heightMm: 600 },
   trajectory: {
     format: 'polar-theta-rho/v1',
     points: [
@@ -121,6 +122,8 @@ describe('MqttTableDriver', () => {
       expect(command).toMatchObject({
         type: 'start',
         jobId: startRequest.jobId,
+        // The table's size travels with the trajectory, for the Pi to scale it.
+        geometry: { shape: 'oval', widthMm: 1000, heightMm: 600 },
         estimatedDurationSeconds: 600,
       });
 

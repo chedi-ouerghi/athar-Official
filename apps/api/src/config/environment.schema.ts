@@ -139,6 +139,13 @@ export const environmentSchema = z
      * address. See {@link parseTrustProxy}.
      */
     TRUST_PROXY: optionalText,
+
+    /**
+     * Web origins allowed to call the API from a browser, comma-separated
+     * (`http://localhost:8081`). The native app needs none. Unset: any
+     * `localhost` origin in development, none in production.
+     */
+    CORS_ORIGINS: optionalText,
   })
   .superRefine((environment, context) => {
     const production = environment.NODE_ENV === 'production';

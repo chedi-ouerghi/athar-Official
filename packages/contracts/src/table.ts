@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import { driverConnectionSchema, tableModeSchema } from './device.js';
 import { featureSchema, planSchema } from './entitlements.js';
+import { tableGeometrySchema } from './geometry.js';
 
 /**
  * Public table identifier: lowercase letters, digits and hyphens, 3 to 40
@@ -62,6 +63,8 @@ export const tableSchema = z.object({
   plan: planSchema,
   /** The voice-assistant add-on, independent of the plan. */
   voiceAssistant: z.boolean(),
+  /** Shape and X/Y size in millimetres, so the app can draw the table to scale. */
+  geometry: tableGeometrySchema,
   /** What the table can do, derived from `plan` and `voiceAssistant` by `featuresFor`. */
   features: z.array(featureSchema),
   /** LED ambience the table shows (from the driver), or `null` before one was set. */

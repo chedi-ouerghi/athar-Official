@@ -143,6 +143,7 @@ describe('provisioning', () => {
     link: `https://link.example.com/pair?tableId=table-abc&token=${TOKEN}`,
     deepLink: pairingDeepLink('table-abc', TOKEN),
     expiresAt: NOW,
+    accountId: 'customer-1',
   };
 
   it('the request has no owner: the customer claims the table', () => {
@@ -150,10 +151,35 @@ describe('provisioning', () => {
       displayName: 'Main hall',
       location: 'Ground floor',
       ownerAccountId: 'someone',
+      customerAccountId: 'customer-1',
     });
 
     expect(parsed).not.toHaveProperty('ownerAccountId');
     expect(parsed.enabled).toBe(true);
+  });
+
+  it('the request names the one customer the code is for, and cannot leave them out', () => {
+    const base = { displayName: 'Main hall', location: 'Ground floor' };
+
+    expect(provisionTableRequestSchema.safeParse(base).success).toBe(false);
+    expect(provisionTableRequestSchema.safeParse({ ...base, customerAccountId: '' }).success).toBe(
+      false,
+    );
+    expect(
+      provisionTableRequestSchema.parse({ ...base, customerAccountId: 'customer-1' })
+        .customerAccountId,
+    ).toBe('customer-1');
+  });
+
+  it('a claim link names the account it is for', () => {
+    const { accountId: _omitted, ...withoutAccount } = pairing;
+
+    expect(claimTokenResponseSchema.safeParse({ tableId: 'table-abc', pairing }).success).toBe(
+      true,
+    );
+    expect(
+      claimTokenResponseSchema.safeParse({ tableId: 'table-abc', pairing: withoutAccount }).success,
+    ).toBe(false);
   });
 
   it('the response holds the broker login and the claim link', () => {

@@ -51,6 +51,7 @@ describe('TableRegistry', () => {
         ownerAccountId: null,
         plan: 'basic',
         voiceAssistant: false,
+        geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
         createdAt: START,
         updatedAt: START,
       });
@@ -131,6 +132,7 @@ describe('TableRegistry', () => {
         ownerAccountId: null,
         plan: 'basic',
         voiceAssistant: false,
+        geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
         createdAt: START,
         updatedAt: '2026-01-01T00:01:00.000Z',
       });

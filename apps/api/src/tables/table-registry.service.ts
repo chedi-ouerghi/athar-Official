@@ -7,7 +7,8 @@
  */
 
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import type { AuthAccount, Plan, UpdateTableRequest } from '@athar/contracts';
+import { DEFAULT_TABLE_GEOMETRY } from '@athar/contracts';
+import type { AuthAccount, Plan, TableGeometry, UpdateTableRequest } from '@athar/contracts';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { CLOCK, type Clock } from '../device/clock.js';
 import { DomainException } from '../common/http/domain.exception.js';
@@ -33,8 +34,12 @@ export interface NewTable {
   readonly location: string;
   readonly enabled: boolean;
   readonly ownerAccountId?: string | null;
+  /** The customer whose QR code claims it (see `reservedForAccountId`). */
+  readonly reservedForAccountId?: string | null;
   readonly plan?: Plan;
   readonly voiceAssistant?: boolean;
+  /** Shape and X/Y size; the placeholder when left out. */
+  readonly geometry?: TableGeometry;
 }
 
 /**
@@ -91,8 +96,13 @@ export class TableRegistry {
         location: input.location,
         enabled: input.enabled,
         ownerAccountId: input.ownerAccountId ?? null,
+        // Only a table made for a customer carries the field.
+        ...(input.reservedForAccountId === undefined
+          ? {}
+          : { reservedForAccountId: input.reservedForAccountId }),
         plan: input.plan ?? 'basic',
         voiceAssistant: input.voiceAssistant ?? false,
+        geometry: input.geometry ?? DEFAULT_TABLE_GEOMETRY,
         createdAt: now,
         updatedAt: now,
       };
@@ -157,7 +167,10 @@ export class TableRegistry {
    *
    * @throws DomainException `TABLE_NOT_FOUND`
    */
-  async update(tableId: string, patch: UpdateTableRequest): Promise<TableRecord> {
+  async update(
+    tableId: string,
+    patch: UpdateTableRequest | { readonly reservedForAccountId: string | null },
+  ): Promise<TableRecord> {
     const updated = await this.repository.update(tableId, {
       ...patch,
       updatedAt: new Date(this.clock.now()).toISOString(),

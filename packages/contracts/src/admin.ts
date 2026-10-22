@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { accountDisplayNameSchema, authAccountSchema, emailSchema } from './auth.js';
 import { planSchema } from './entitlements.js';
 import { pairingLinkSchema, pairingTokenSchema } from './pairing.js';
+import { DEFAULT_TABLE_GEOMETRY, tableGeometrySchema } from './geometry.js';
 import { tableIdSchema } from './table.js';
 
 /** Fields an admin can set on a table. Shared by create and update. */
@@ -38,8 +39,16 @@ export const adminTableSchema = z.object({
   enabled: z.boolean(),
   // Defaults, so a tables file written before orders existed still loads.
   ownerAccountId: z.string().nullable().default(null),
+  /**
+   * The customer a table was provisioned for, until they claim it: its QR code
+   * works for that account only. Absent on a table made before codes were bound to
+   * a customer.
+   */
+  reservedForAccountId: z.string().nullable().optional(),
   plan: planSchema.default('basic'),
   voiceAssistant: z.boolean().default(false),
+  // Defaults, so a tables file written before sizes were configured still loads.
+  geometry: tableGeometrySchema.default(DEFAULT_TABLE_GEOMETRY),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -54,6 +63,8 @@ export const createTableRequestSchema = z.object({
   ownerAccountId: ownerAccountIdSchema.default(null),
   plan: planSchema.default('basic'),
   voiceAssistant: z.boolean().default(false),
+  /** Shape and X/Y size. Left out, it is the placeholder `DEFAULT_TABLE_GEOMETRY`. */
+  geometry: tableGeometrySchema.default(DEFAULT_TABLE_GEOMETRY),
 });
 export type CreateTableRequest = z.input<typeof createTableRequestSchema>;
 
@@ -87,10 +98,12 @@ export const updateTableRequestSchema = z
     ownerAccountId: ownerAccountIdSchema.optional(),
     plan: planSchema.optional(),
     voiceAssistant: z.boolean().optional(),
+    /** Replaces shape and both dimensions together, so they cannot disagree. */
+    geometry: tableGeometrySchema.optional(),
   })
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
     message:
-      'Provide at least one of displayName, location, enabled, ownerAccountId, plan or voiceAssistant.',
+      'Provide at least one of displayName, location, enabled, ownerAccountId, plan, voiceAssistant or geometry.',
   });
 export type UpdateTableRequest = z.infer<typeof updateTableRequestSchema>;
 
@@ -118,11 +131,26 @@ export type TableQrResponse = z.infer<typeof tableQrResponseSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * Body of `POST /api/v1/admin/tables/provision`: a table that nobody owns yet.
- * The customer claims it with the QR code, so there is no `ownerAccountId`.
+ * Body of `POST /api/v1/admin/tables/provision`: a table that nobody owns yet, for
+ * one named customer. That customer claims it with the QR code, so there is no
+ * `ownerAccountId`; `customerAccountId` says who the code is for, and nobody else
+ * can use it.
  */
-export const provisionTableRequestSchema = createTableRequestSchema.omit({ ownerAccountId: true });
+export const provisionTableRequestSchema = createTableRequestSchema
+  .omit({ ownerAccountId: true })
+  .extend({ customerAccountId: z.string().min(1).max(100) });
 export type ProvisionTableRequest = z.input<typeof provisionTableRequestSchema>;
+
+/** Body of `POST /api/v1/admin/tables/:tableId/claim-token`. */
+export const claimTokenRequestSchema = z.object({
+  /**
+   * Who the new code is for. Left out, it is the customer the table was
+   * provisioned for; a table provisioned before codes were bound to a customer
+   * has none, and must be given one here.
+   */
+  customerAccountId: z.string().min(1).max(100).optional(),
+});
+export type ClaimTokenRequest = z.infer<typeof claimTokenRequestSchema>;
 
 /**
  * The broker login of one table's controller. Shown once, never stored in clear.
@@ -139,8 +167,14 @@ export const mqttCredentialsSchema = z.object({
 });
 export type MqttCredentials = z.infer<typeof mqttCredentialsSchema>;
 
-/** A claim link with its raw token: shown once, because the server keeps only a hash. */
-export const claimTokenSchema = pairingLinkSchema.extend({ token: pairingTokenSchema });
+/**
+ * A claim link with its raw token: shown once, because the server keeps only a
+ * hash. `accountId` is the one customer account that can redeem it.
+ */
+export const claimTokenSchema = pairingLinkSchema.extend({
+  token: pairingTokenSchema,
+  accountId: z.string().min(1),
+});
 export type ClaimToken = z.infer<typeof claimTokenSchema>;
 
 /**

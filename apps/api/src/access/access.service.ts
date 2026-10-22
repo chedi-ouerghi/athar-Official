@@ -1,10 +1,13 @@
 /**
  * Claiming a table and sharing it.
  *
- * - An admin **provisions** a table nobody owns and gets a one-time claim token
- *   (printed in its QR code; 30 days, replaceable while the table is unclaimed).
- * - A customer who scans it **claims** the table: the token is spent and the
- *   account becomes the owner (`ownerAccountId`).
+ * - An admin **provisions** a table nobody owns, for one named customer, and gets
+ *   a one-time claim token (printed in its QR code; 30 days, replaceable while the
+ *   table is unclaimed). The token is bound to that table and that customer's
+ *   account.
+ * - That customer scans it and **claims** the table: the token is spent and the
+ *   account becomes the owner (`ownerAccountId`). Another account scanning it is
+ *   refused (`PAIRING_WRONG_ACCOUNT`) and nothing is spent.
  * - The owner **shares** the table with a link; whoever follows it becomes a
  *   guest until the link expires. A guest may read and command the table, never
  *   share it.
@@ -61,11 +64,17 @@ export class AccessService {
    *
    * @throws DomainException `TABLE_NOT_FOUND`, `TABLE_ALREADY_CLAIMED`
    */
-  async issueClaim(tableId: string): Promise<ClaimToken> {
+  async issueClaim(tableId: string, accountId: string): Promise<ClaimToken> {
     const table = await this.registry.get(tableId);
 
     if (table.ownerAccountId !== null) {
       throw alreadyClaimed(tableId);
+    }
+
+    // The table remembers who it is for, so a replacement code (the printed one
+    // expired in stock) is for the same customer without asking again.
+    if (table.reservedForAccountId !== accountId) {
+      await this.registry.update(tableId, { reservedForAccountId: accountId });
     }
 
     const now = this.clock.now();
@@ -85,12 +94,17 @@ export class AccessService {
         maxUses: 1,
         usedCount: 0,
         revokedAt: null,
+        accountId,
       },
       now,
     );
     this.logger.log(`Issued a claim code for table ${tableId}`);
 
-    return { ...buildPairingLink(this.config.publicLinkBaseUrl, tableId, token, expiresAt), token };
+    return {
+      ...buildPairingLink(this.config.publicLinkBaseUrl, tableId, token, expiresAt),
+      token,
+      accountId,
+    };
   }
 
   /**
@@ -165,6 +179,14 @@ export class AccessService {
 
       case 'already-claimed':
         throw alreadyClaimed(tableId);
+
+      case 'wrong-account':
+        // Said plainly: the code is the customer's own secret, and a customer signed
+        // in to the wrong account needs to know to switch rather than to ask for a new one.
+        throw new DomainException(
+          'PAIRING_WRONG_ACCOUNT',
+          'This code was issued for another account. Sign in with the account it was made for.',
+        );
 
       case 'guest':
         this.logger.log(`Table ${tableId} joined by a guest`);

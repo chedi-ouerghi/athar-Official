@@ -30,6 +30,8 @@ describe('parseTableCreateArguments', () => {
       ownerAccountId: null,
       plan: 'basic',
       voiceAssistant: false,
+      // Until the command takes a size, the admin sets the real one afterwards.
+      geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
     });
   });
 

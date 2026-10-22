@@ -20,7 +20,8 @@ const DEFAULT_PORTS: Readonly<Record<string, number>> = {
  */
 export function newMqttCredentials(tableId: string, brokerUrl: string): MqttCredentials {
   const url = new URL(brokerUrl);
-  const name = `t-${tableId}`;
+  // The broker ACL scopes a table to `athar/v1/t/%u/...`, so the login must be the table id itself.
+  const name = tableId;
 
   return {
     host: url.hostname,

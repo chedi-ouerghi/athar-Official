@@ -116,6 +116,8 @@ describe('the full journey', () => {
       activeJobId: null,
       plan: 'basic',
       voiceAssistant: false,
+      // `createTable` sends no size: the placeholder applies.
+      geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
       features: ['catalogue', 'rake'],
       ambienceId: null,
       readiness: { paired: true, online: true, free: true, canStart: true },

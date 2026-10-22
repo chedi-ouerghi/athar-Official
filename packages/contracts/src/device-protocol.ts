@@ -19,6 +19,7 @@
 import { z } from 'zod';
 import { lightSchema } from './ambience.js';
 import { driverErrorCodeSchema, driverStatusSchema } from './device.js';
+import { tableGeometrySchema } from './geometry.js';
 import { tableIdSchema } from './table.js';
 
 /** Protocol version carried by every message. */
@@ -53,6 +54,12 @@ export const deviceCommandSchema = z.discriminatedUnion('type', [
     type: z.literal('start'),
     jobId: z.uuid(),
     trajectory: trajectorySchema,
+    /**
+     * The table's shape and size, so the controller can scale the normalised
+     * trajectory to it (the mapping is in `geometry.ts`). Absent from an API
+     * older than the sizes: a controller then assumes its own configured size.
+     */
+    geometry: tableGeometrySchema.optional(),
     /** Informative: a real table takes as long as it takes. */
     estimatedDurationSeconds: z.number().positive().optional(),
   }),

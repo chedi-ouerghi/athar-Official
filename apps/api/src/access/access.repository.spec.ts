@@ -30,6 +30,7 @@ function tokenFor(raw: string, overrides: Partial<TokenRecord> = {}): TokenRecor
     maxUses: 1,
     usedCount: 0,
     revokedAt: null,
+    accountId: 'account-1',
     ...overrides,
   };
 }
@@ -58,6 +59,28 @@ describe('TableAccessRepository', () => {
       expect(repository.findTokenByHash(sha256(raw))).toMatchObject({ kind: 'claim' });
       expect(repository.findTokenByHash(raw)).toBeUndefined();
       expect(JSON.stringify(repository.list())).not.toContain(raw);
+    });
+
+    it('are for one account: another account is refused and nothing is spent', async () => {
+      const raw = newToken();
+      const repository = TableAccessRepository.inMemory();
+      await repository.insertToken(tokenFor(raw, { accountId: 'owner-account' }), NOW);
+
+      expect(await redeem(repository, raw, { accountId: 'someone-else' })).toStrictEqual({
+        outcome: 'wrong-account',
+      });
+      // The customer it was issued for can still use it afterwards.
+      expect(await redeem(repository, raw, { accountId: 'owner-account' })).toMatchObject({
+        outcome: 'claimed',
+      });
+    });
+
+    it('issued with no account (before codes were bound to a customer) cannot be redeemed', async () => {
+      const raw = newToken();
+      const repository = TableAccessRepository.inMemory();
+      await repository.insertToken(tokenFor(raw, { accountId: null }), NOW);
+
+      expect(await redeem(repository, raw)).toStrictEqual({ outcome: 'invalid' });
     });
 
     it('work once: the second redemption is invalid', async () => {
@@ -250,7 +273,7 @@ describe('TableAccessRepository', () => {
 
     it('a single-use claim token is won by exactly one of fifty simultaneous accounts', async () => {
       const raw = newToken();
-      await repository.insertToken(tokenFor(raw), NOW);
+      await repository.insertToken(tokenFor(raw, { accountId: 'account-7' }), NOW);
 
       const outcomes = await Promise.all(
         Array.from({ length: 50 }, (_, index) =>
@@ -258,8 +281,17 @@ describe('TableAccessRepository', () => {
         ),
       );
 
+      // Only the account the code is for can win it; the other forty-nine are turned away,
+      // as a wrong account until the code is spent and as an invalid code after.
       expect(outcomes.filter((result) => result.outcome === 'claimed')).toHaveLength(1);
-      expect(outcomes.filter((result) => result.outcome === 'invalid')).toHaveLength(49);
+      expect(
+        outcomes.filter(
+          (result) => result.outcome === 'wrong-account' || result.outcome === 'invalid',
+        ),
+      ).toHaveLength(49);
+      expect(repository.list().filter((record) => record.kind === 'claim')[0]).toMatchObject({
+        usedCount: 1,
+      });
     });
 
     it('a share token with three uses is shared by exactly three of twenty simultaneous accounts', async () => {

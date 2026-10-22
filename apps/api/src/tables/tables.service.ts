@@ -154,6 +154,7 @@ export class TablesService {
       activeJobId,
       plan: record.plan,
       voiceAssistant: record.voiceAssistant,
+      geometry: record.geometry,
       // The one place the API derives a table's features.
       features: featuresFor(record),
       ambienceId: status.ambienceId,

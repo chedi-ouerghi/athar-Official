@@ -20,7 +20,7 @@ const stored = {
 };
 
 describe('create table request', () => {
-  it('defaults to enabled, no owner, the basic plan and no voice assistant', () => {
+  it('defaults to enabled, no owner, the basic plan, no voice assistant and the placeholder size', () => {
     const parsed = createTableRequestSchema.parse({ displayName: 'Hall', location: 'Floor 1' });
 
     expect(parsed).toStrictEqual({
@@ -30,6 +30,7 @@ describe('create table request', () => {
       ownerAccountId: null,
       plan: 'basic',
       voiceAssistant: false,
+      geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
     });
   });
 

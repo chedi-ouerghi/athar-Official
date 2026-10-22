@@ -38,6 +38,7 @@ describe('table', () => {
     activeJobId: null,
     plan: 'personalized',
     voiceAssistant: true,
+    geometry: { shape: 'rectangle', widthMm: 1200, heightMm: 800 },
     features: ['catalogue', 'rake', 'drawingPen', 'ledAmbiences', 'voiceAssistant'],
     ambienceId: 'amber',
     readiness: { paired: true, online: true, free: true, canStart: true },

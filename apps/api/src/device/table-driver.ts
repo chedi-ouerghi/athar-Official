@@ -20,6 +20,7 @@ import type {
   DriverPhase,
   DriverStatus,
   Light,
+  TableGeometry,
   TableMode,
 } from '@athar/contracts';
 import type { Trajectory } from './trajectory.js';
@@ -74,6 +75,11 @@ export interface DriverStartRequest {
   /** Chosen by the API; the driver echoes it in every status it emits. */
   readonly jobId: string;
   readonly trajectory: Trajectory;
+  /**
+   * The table's shape and size, for a hardware driver to scale the normalised
+   * trajectory to it. The simulator ignores it.
+   */
+  readonly geometry?: TableGeometry;
   /**
    * How long the drawing is expected to take. The simulator paces itself with
    * it; a hardware driver ignores it, because a real table takes as long as it

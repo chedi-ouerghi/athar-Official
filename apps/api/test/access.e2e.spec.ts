@@ -42,18 +42,39 @@ async function setup(environment: Record<string, unknown> = { PUBLIC_LINK_BASE_U
   app = created;
   const http = () => request(created.getHttpServer());
   const admin = await signIn(created, 'admin');
-  const customer = () => signIn(created, 'customer');
 
-  const provision = async () =>
-    provisionTableResponseSchema.parse(
+  /** Customers a table was provisioned for, not yet handed out by `customer()`. */
+  const reserved: SessionResponse[] = [];
+
+  /**
+   * The customer that scans next: the one the last table provisioned here was made
+   * for (a code is for one customer only), or a new customer when none is waiting.
+   */
+  const customer = async () => reserved.shift() ?? signIn(created, 'customer');
+
+  /** A table for `forCustomer`, or for a new customer that `customer()` will return. */
+  const provision = async (forCustomer?: SessionResponse) => {
+    const target = forCustomer ?? (await signIn(created, 'customer'));
+    const provisioned = provisionTableResponseSchema.parse(
       (
         await http()
           .post('/api/v1/admin/tables/provision')
           .set(bearer(admin))
-          .send({ displayName: 'Hall', location: 'Ground floor' })
+          .send({
+            displayName: 'Hall',
+            location: 'Ground floor',
+            customerAccountId: target.account.id,
+          })
           .expect(201)
       ).body,
     );
+
+    if (forCustomer === undefined) {
+      reserved.push(target);
+    }
+
+    return provisioned;
+  };
 
   const pair = (session: SessionResponse, tableId: string, token: string) =>
     http().post('/api/v1/tables/pair').set(bearer(session)).send({ tableId, token });
@@ -136,8 +157,8 @@ describe('provisioning a table (admin)', () => {
       host: 'localhost',
       port: 1883,
       tls: false,
-      username: `t-${table.id}`,
-      clientId: `t-${table.id}`,
+      username: table.id,
+      clientId: table.id,
     });
     expect(mqtt.password.length).toBeGreaterThanOrEqual(32);
     expect(pairing.link).toBe(`${BASE}/pair?tableId=${table.id}&token=${pairing.token}`);
@@ -145,13 +166,12 @@ describe('provisioning a table (admin)', () => {
     expect(Date.parse(pairing.expiresAt) - api.clock.now()).toBe(CLAIM_TOKEN_TTL_MS);
   });
 
-  it('holds no broker credential in the link the QR code carries', async () => {
+  it('holds no broker password in the link the QR code carries', async () => {
     const api = await setup();
 
     const { mqtt, pairing } = await api.provision();
 
     expect(JSON.stringify(pairing)).not.toContain(mqtt.password);
-    expect(JSON.stringify(pairing)).not.toContain(mqtt.username);
   });
 
   it('uses the app link in development, when no public origin is configured', async () => {
@@ -188,6 +208,88 @@ describe('provisioning a table (admin)', () => {
     ).toBe('VALIDATION_FAILED');
   });
 
+  describe('a code is for one table and one customer', () => {
+    it('names the customer it is for', async () => {
+      const api = await setup();
+      const { table, pairing } = await api.provision();
+      const owner = await api.customer();
+
+      expect(pairing.accountId).toBe(owner.account.id);
+      expect(table.reservedForAccountId).toBe(owner.account.id);
+    });
+
+    it('turns another customer away, says why, and stays valid for the right one', async () => {
+      const api = await setup();
+      const { table, pairing } = await api.provision();
+      const owner = await api.customer();
+      const intruder = await api.customer();
+
+      expect(await api.codeOf(api.pair(intruder, table.id, pairing.token), 403)).toBe(
+        'PAIRING_WRONG_ACCOUNT',
+      );
+      // The wrong customer learned nothing and gained nothing, and the code is not spent.
+      await api.read(intruder, table.id).expect(404);
+      expect(
+        pairTableResponseSchema.parse(
+          (await api.pair(owner, table.id, pairing.token).expect(200)).body,
+        ),
+      ).toStrictEqual({ tableId: table.id, role: 'owner', expiresAt: null });
+    });
+
+    it('is not for an admin either', async () => {
+      const api = await setup();
+      const { table, pairing } = await api.provision();
+
+      await api.pair(api.admin, table.id, pairing.token).expect(403);
+    });
+
+    it('needs a customer that exists and is active when the table is provisioned', async () => {
+      const api = await setup();
+      const send = (body: object) =>
+        api
+          .http()
+          .post('/api/v1/admin/tables/provision')
+          .set(bearer(api.admin))
+          .send({ displayName: 'Hall', location: 'Floor', ...body });
+
+      expect(await api.codeOf(send({}), 400)).toBe('VALIDATION_FAILED');
+      expect(await api.codeOf(send({ customerAccountId: 'no-such-account' }), 400)).toBe(
+        'VALIDATION_FAILED',
+      );
+      expect(await api.codeOf(send({ customerAccountId: api.admin.account.id }), 400)).toBe(
+        'VALIDATION_FAILED',
+      );
+    });
+
+    it('moves to another customer when the admin asks for a code for them', async () => {
+      const api = await setup();
+      const { table, pairing } = await api.provision();
+      const first = await api.customer();
+      const second = await api.customer();
+
+      const fresh = claimTokenResponseSchema.parse(
+        (
+          await api
+            .http()
+            .post(`/api/v1/admin/tables/${table.id}/claim-token`)
+            .set(bearer(api.admin))
+            .send({ customerAccountId: second.account.id })
+            .expect(201)
+        ).body,
+      );
+
+      expect(fresh.pairing.accountId).toBe(second.account.id);
+      // The first code is replaced, and the new one is no use to the first customer.
+      expect(await api.codeOf(api.pair(first, table.id, pairing.token), 400)).toBe(
+        'PAIRING_TOKEN_INVALID',
+      );
+      expect(await api.codeOf(api.pair(first, table.id, fresh.pairing.token), 403)).toBe(
+        'PAIRING_WRONG_ACCOUNT',
+      );
+      await api.pair(second, table.id, fresh.pairing.token).expect(200);
+    });
+  });
+
   describe('a new claim code', () => {
     const regenerate = (api: Api, tableId: string, admin: SessionResponse = api.admin) =>
       api.http().post(`/api/v1/admin/tables/${tableId}/claim-token`).set(bearer(admin));
@@ -213,7 +315,8 @@ describe('provisioning a table (admin)', () => {
       const api = await setup();
       const { table, pairing } = await api.provision();
       api.clock.advance(CLAIM_TOKEN_TTL_MS + 1);
-      const customer = await api.customer();
+      // The customer was made with the table, so its session ended with the weeks that passed.
+      const customer = await api.relogin(await api.customer());
       const admin = await api.relogin(api.admin);
 
       expect(await api.codeOf(api.pair(customer, table.id, pairing.token), 400)).toBe(

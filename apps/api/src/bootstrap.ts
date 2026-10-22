@@ -151,6 +151,15 @@ async function buildApp(
   if (config.trustProxy !== undefined) {
     app.set('trust proxy', config.trustProxy);
   }
+  // Browsers (Expo web) need CORS; the native app does not. Bearer tokens, no cookies.
+  const origins: (string | RegExp)[] = [...config.corsOrigins];
+  if (origins.length === 0 && config.nodeEnv === 'development') {
+    origins.push(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/);
+  }
+  if (origins.length > 0) {
+    app.enableCors({ origin: origins, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] });
+  }
+
   app.setGlobalPrefix(API_PREFIX, { exclude: [...UNPREFIXED_PROBES] });
   app.enableVersioning({
     type: VersioningType.URI,

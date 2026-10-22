@@ -47,6 +47,8 @@ export interface AppConfig {
   readonly trustProxy: number | string[] | undefined;
   /** Origin for QR links, without a trailing slash; undefined in development. */
   readonly publicLinkBaseUrl: string | undefined;
+  /** Browser origins allowed by CORS; empty means the development default or none. */
+  readonly corsOrigins: readonly string[];
   readonly serviceName: string;
   readonly serviceVersion: string;
 }
@@ -84,6 +86,10 @@ export function createAppConfig(environment: Environment, serviceVersion: string
     trustProxy:
       environment.TRUST_PROXY === undefined ? undefined : parseTrustProxy(environment.TRUST_PROXY),
     publicLinkBaseUrl: environment.PUBLIC_LINK_BASE_URL,
+    corsOrigins: (environment.CORS_ORIGINS ?? '')
+      .split(',')
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
+      .filter((origin) => origin !== ''),
     serviceName: 'athar-api',
     serviceVersion,
   };
