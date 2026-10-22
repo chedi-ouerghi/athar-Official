@@ -55,13 +55,12 @@ describe('JobScreen', () => {
     jest.restoreAllMocks();
   });
 
-  it('shows the Simulation badge, the percentage, the state in words, and the drawn part following progress', async () => {
+  it('shows the percentage, the state in words, and the drawn part following progress', async () => {
     setup({
       getJob: jest.fn<JobCall>().mockResolvedValue(job({ state: 'drawing', progress: 0.5 })),
     });
     await settle();
 
-    expect(screen.getByText('Simulation')).toBeTruthy();
     expect(screen.getByTestId('job-percent').props.children).toBe('50%');
     expect(screen.getByTestId('job-state').props.children).toBe('Drawing');
     expect(screen.getByTestId('job-preview-drawn')).toBeTruthy();
@@ -283,7 +282,6 @@ describe('JobScreen', () => {
     );
     await settle();
 
-    expect(screen.getByText('محاكاة')).toBeTruthy();
     expect(screen.getByTestId('job-state').props.children).toBe('متوقف مؤقتًا');
     expect(screen.getByText('متابعة')).toBeTruthy();
   });

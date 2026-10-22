@@ -1,15 +1,18 @@
 import { isActiveJobState } from '@athar/contracts';
 import { useEffect, type ReactElement } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { DotRule } from '../../components/DotRule';
 import { ErrorState } from '../../components/ErrorState';
+import { FadeIn, staggerDelay } from '../../components/FadeIn';
 import { LoadingState } from '../../components/LoadingState';
 import { ModeBadge } from '../../components/ModeBadge';
 import { NoticeCard } from '../../components/NoticeCard';
-import { FadeIn } from '../../components/FadeIn';
-import { Ornament } from '../../components/Ornament';
 import { Screen } from '../../components/Screen';
+import { SuccessMark } from '../../components/SuccessMark';
 import { useI18n } from '../../i18n/context';
+import { spacing } from '../../theme';
 import { describeResult } from './result-wording';
 import { useJob } from './useJob';
 
@@ -83,28 +86,49 @@ export function ResultScreen({
   }
 
   return (
-    <Screen testID="result-screen">
-      <ModeBadge mode={state.job.mode} testID="result-mode" />
-      <FadeIn style={styles.ornament}>
-        <Ornament size={160} strength={0.9} />
-      </FadeIn>
-      <FadeIn delay={140}>
-        <NoticeCard
-          title={t(wording.title)}
-          body={t(wording.body)}
-          tone={
-            wording.tone === 'success'
-              ? 'success'
-              : wording.tone === 'danger'
-                ? 'danger'
-                : 'neutral'
-          }
-          testID="result-notice"
+    <Screen
+      testID="result-screen"
+      contentStyle={styles.content}
+      footer={
+        <Button
+          label={t('result.drawAgain')}
+          dot
+          onPress={onDrawAgain}
+          testID="result-draw-again"
         />
+      }
+    >
+      <FadeIn style={styles.badge}>
+        <ModeBadge mode={state.job.mode} testID="result-mode" />
       </FadeIn>
-      <Button label={t('result.drawAgain')} onPress={onDrawAgain} testID="result-draw-again" />
+
+      <SuccessMark
+        tone={
+          wording.tone === 'success' ? 'success' : wording.tone === 'danger' ? 'danger' : 'neutral'
+        }
+      />
+
+      <FadeIn delay={staggerDelay(3)}>
+        <View style={styles.words} testID="result-notice">
+          <AppText variant="title" style={styles.centre}>
+            {t(wording.title)}
+          </AppText>
+          <View style={styles.rule}>
+            <DotRule />
+          </View>
+          <AppText tone="textMuted" style={styles.centre}>
+            {t(wording.body)}
+          </AppText>
+        </View>
+      </FadeIn>
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({ ornament: { alignItems: 'center' } });
+const styles = StyleSheet.create({
+  content: { justifyContent: 'center', gap: spacing.lg },
+  badge: { alignItems: 'center' },
+  words: { alignItems: 'center', gap: spacing.md },
+  rule: { alignSelf: 'stretch' },
+  centre: { textAlign: 'center' },
+});

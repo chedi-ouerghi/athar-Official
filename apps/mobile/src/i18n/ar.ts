@@ -43,19 +43,19 @@ export const ar: Readonly<Record<TranslationKey, string>> = {
   'designPreview.label': 'معاينة التصميم',
   'designPreview.labelWithProgress': 'معاينة التصميم، تم رسم {percent}',
 
-  'home.tagline': 'شاهد الأنماط تتشكّل في الرمال.',
+  'home.tagline': 'طاولة فنية تتجدّد رسومها في الرمال، صُنعت لتكون قلب الغرفة.',
   'home.scan': 'امسح رمز طاولتك',
-  'home.enterCode': 'أدخل رمز الطاولة',
+  'home.enterCode': 'أدخل الرابط بدلًا من ذلك',
   'home.diagnostics': 'تفاصيل الاتصال',
 
-  'code.label': 'رمز الطاولة أو رابطها',
-  'code.placeholder': 'مثال: k7q3x9m2d8r5t6w4',
-  'code.submit': 'فتح الطاولة',
-  'code.invalid': 'هذا الرمز غير صالح. تحقّق منه وحاول مرة أخرى.',
+  'code.label': 'الرابط المرفق مع طاولتك',
+  'code.placeholder': 'الصق الرابط المرفق مع طاولتك',
+  'code.submit': 'اربط طاولتي',
+  'code.invalid': 'هذا ليس الرابط المخصص لطاولتك. تحقّق منه وحاول مرة أخرى.',
 
   'scan.title': 'امسح رمز QR الموجود على طاولتك',
   'scan.hint': 'وجّه الكاميرا نحو الرمز الموجود على الطاولة.',
-  'scan.unrecognised': 'هذا ليس رمز طاولة من أثر. جرّب الرمز الموجود على طاولتك.',
+  'scan.unrecognised': 'هذا ليس الرمز المخصص لطاولتك. امسح رمز QR المرفق معها.',
   'scan.permission.title': 'الوصول إلى الكاميرا',
   'scan.permission.explain':
     'يستخدم التطبيق الكاميرا فقط لقراءة رمز QR الموجود على طاولتك. لا يتم تسجيل أي شيء أو حفظه.',
@@ -63,7 +63,7 @@ export const ar: Readonly<Record<TranslationKey, string>> = {
   'scan.permission.denied':
     'الوصول إلى الكاميرا متوقف. يمكنك تفعيله من الإعدادات، أو إدخال رمز الطاولة بدلًا من ذلك.',
   'scan.permission.settings': 'فتح الإعدادات',
-  'scan.enterInstead': 'أدخل رمز الطاولة بدلًا من ذلك',
+  'scan.enterInstead': 'أدخل الرابط بدلًا من ذلك',
 
   'table.status': 'الحالة',
   'table.connection.online': 'جاهزة للرسم',
@@ -80,6 +80,10 @@ export const ar: Readonly<Record<TranslationKey, string>> = {
   'table.offline.body': 'تعذّر الوصول إليها حاليًا. يُرجى المحاولة بعد قليل.',
   'table.busy.title': 'هذه الطاولة ترسم الآن',
   'table.busy.body': 'هناك من يرسم هنا بالفعل. يمكنك مشاهدة الرسم، أو العودة بعد أن ينتهي.',
+  'table.shape.round': 'طاولة دائرية، قطرها {diameter} مم',
+  'table.shape.square': 'طاولة مربعة، {side} مم',
+  'table.shape.rectangle': 'طاولة مستطيلة، {width} × {height} مم',
+  'table.shape.oval': 'طاولة بيضاوية، {width} × {height} مم',
   'table.watch': 'شاهد الرسم',
 
   'duration.minutes': 'حوالي {value} دقيقة',
@@ -141,6 +145,7 @@ export const ar: Readonly<Record<TranslationKey, string>> = {
   'diagnostics.checks': 'الفحوصات',
 
   'error.pairingTokenInvalid': 'هذا الرمز لم يعد صالحًا. اطلب من مالك الطاولة دعوة جديدة.',
+  'error.pairingWrongAccount': 'هذا الرمز مخصص لحساب آخر. سجّل الدخول بالحساب الذي أُنشئ له.',
   'error.tableAlreadyClaimed': 'هذه الطاولة مملوكة لشخص آخر. اطلب من مالكها أن يدعوك.',
   'error.invalidCredentials': 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
   'error.activationInvalid': 'رمز التفعيل غير صالح أو سبق استخدامه.',
@@ -149,7 +154,7 @@ export const ar: Readonly<Record<TranslationKey, string>> = {
   'error.notAllowed': 'غير مسموح لك بذلك على هذه الطاولة.',
   'error.lightNotIncluded': 'طاولتك لا تشمل الإضاءة الملوّنة.',
   'error.reconnect': 'انقطع الاتصال بالطاولة. يُرجى المحاولة مرة أخرى.',
-  'signIn.title': 'مرحبًا بك في أثر',
+  'signIn.title': 'مرحبًا بك في *أثر*',
   'signIn.email': 'البريد الإلكتروني',
   'signIn.password': 'كلمة المرور',
   'signIn.submit': 'تسجيل الدخول',
@@ -176,4 +181,30 @@ export const ar: Readonly<Record<TranslationKey, string>> = {
   'share.send': 'إرسال الدعوة مرة أخرى',
   'share.message': 'انضم إلى طاولتي في أثر: {link}',
   'share.failed': 'تعذّر إنشاء الدعوة',
+
+  'tabs.home': 'الرئيسية',
+  'tabs.scan': 'مسح',
+  'tabs.account': 'حسابي',
+
+  'home.greeting': 'أهلًا بعودتك',
+  'home.heroTitle': 'فنٌّ في حركة، وأثرٌ *يدوم*.',
+  'home.recent': 'تابع من حيث توقفت',
+  'home.recentOpen': 'افتح هذه الطاولة',
+
+  'account.title': 'حسابك *الشخصي*',
+  'account.role.admin': 'مسؤول',
+  'account.role.customer': 'عميل',
+  'account.appearance': 'المظهر',
+  'account.theme.system': 'تلقائي',
+  'account.theme.light': 'فاتح',
+  'account.theme.dark': 'داكن',
+
+  'signIn.subtitle': 'سجّل الدخول للتحكم في طاولتك الرملية.',
+  'signIn.tab.signIn': 'تسجيل الدخول',
+  'signIn.tab.activate': 'تفعيل',
+  'signIn.showPassword': 'إظهار كلمة المرور',
+  'signIn.hidePassword': 'إخفاء كلمة المرور',
+
+  'table.lightAndShare': 'الإضاءة والمشاركة',
+  'table.designsCount': '{count} تصميمًا',
 };

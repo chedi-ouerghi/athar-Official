@@ -1,12 +1,14 @@
-import { isTerminalJobState, type DrawingJob } from '@athar/contracts';
+import { isTerminalJobState, type DrawingJob, type TableGeometry } from '@athar/contracts';
 import { useEffect, type ReactElement } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, Platform, StyleSheet, View } from 'react-native';
 import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
 import { DesignPreview } from '../../components/DesignPreview';
 import { ErrorState } from '../../components/ErrorState';
+import { Eyebrow } from '../../components/Eyebrow';
+import { FadeIn, staggerDelay } from '../../components/FadeIn';
 import { LoadingState } from '../../components/LoadingState';
-import { ModeBadge } from '../../components/ModeBadge';
 import { NoticeCard } from '../../components/NoticeCard';
 import { ProgressBar } from '../../components/ProgressBar';
 import { Screen } from '../../components/Screen';
@@ -22,16 +24,19 @@ export interface JobScreenProps {
   /** Poll only while true: the screen is in front and the app is in use. */
   readonly active: boolean;
   readonly pollIntervalMs: number;
+  /** The table's shape and size, so the picture has its shape. Round when left out. */
+  readonly geometry?: TableGeometry;
   /** The job reached a terminal state: go to the result. Called once per job. */
   readonly onFinished: () => void;
   readonly onBackToTable: () => void;
 }
 
-/** A drawing in progress: the picture filling in, and the commands. */
+/** A drawing in progress: the picture filling in, and the commands pinned below it. */
 export function JobScreen({
   jobId,
   active,
   pollIntervalMs,
+  geometry,
   onFinished,
   onBackToTable,
 }: JobScreenProps): ReactElement {
@@ -73,6 +78,7 @@ export function JobScreen({
   return (
     <JobBody
       job={state.job}
+      geometry={geometry}
       trouble={state.trouble}
       commandError={commands.error}
       onCommand={commands.run}
@@ -83,6 +89,7 @@ export function JobScreen({
 
 interface JobBodyProps {
   readonly job: DrawingJob;
+  readonly geometry: TableGeometry | undefined;
   readonly trouble: boolean;
   readonly commandError: unknown;
   readonly onCommand: (command: JobCommand) => Promise<void>;
@@ -91,6 +98,7 @@ interface JobBodyProps {
 
 function JobBody({
   job,
+  geometry,
   trouble,
   commandError,
   onCommand,
@@ -109,6 +117,14 @@ function JobBody({
   }, [finished, onFinished]);
 
   const confirmStop = () => {
+    // react-native-web's Alert.alert does nothing, so the web asks with the browser's own dialog.
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${t('job.stop.confirmTitle')}\n${t('job.stop.confirmBody')}`)) {
+        void onCommand('stop');
+      }
+      return;
+    }
+
     Alert.alert(t('job.stop.confirmTitle'), t('job.stop.confirmBody'), [
       { text: t('job.stop.keep'), style: 'cancel' },
       {
@@ -121,27 +137,59 @@ function JobBody({
     ]);
   };
 
-  return (
-    <Screen testID="job-screen">
-      <ModeBadge mode={job.mode} testID="job-mode" />
-
-      {design.state.status === 'ready' && design.state.data !== null ? (
-        <DesignPreview
-          path={design.state.data.previewPath}
-          progress={job.progress}
-          ring
-          testID="job-preview"
+  const commands = finished ? undefined : (
+    <View style={styles.commands}>
+      {job.state === 'drawing' ? (
+        <Button
+          label={t('job.pause')}
+          variant="secondary"
+          icon="pause"
+          onPress={() => onCommand('pause')}
+          testID="job-pause"
         />
       ) : null}
+      {job.state === 'paused' ? (
+        <Button
+          label={t('job.resume')}
+          icon="play"
+          onPress={() => onCommand('resume')}
+          testID="job-resume"
+        />
+      ) : null}
+      <Button
+        label={t('job.stop')}
+        variant="ghost"
+        icon="stop"
+        onPress={confirmStop}
+        testID="job-stop"
+      />
+    </View>
+  );
 
-      <View style={styles.status}>
+  return (
+    <Screen testID="job-screen" footer={commands}>
+      {design.state.status === 'ready' && design.state.data !== null ? (
+        <FadeIn>
+          <Card tone="glow" padding="md" style={styles.stage}>
+            <DesignPreview
+              path={design.state.data.previewPath}
+              progress={job.progress}
+              ring
+              geometry={geometry}
+              testID="job-preview"
+            />
+          </Card>
+        </FadeIn>
+      ) : null}
+
+      <FadeIn delay={staggerDelay(2)} style={styles.status}>
         <AppText variant="hero" testID="job-percent">
           {percent(job.progress)}
         </AppText>
-        <AppText variant="heading" tone="accentText" testID="job-state">
+        <Eyebrow accent testID="job-state">
           {t(JOB_STATE_KEY[job.state])}
-        </AppText>
-      </View>
+        </Eyebrow>
+      </FadeIn>
 
       <ProgressBar progress={job.progress} />
 
@@ -154,32 +202,12 @@ function JobBody({
       {commandError !== undefined ? (
         <ErrorState error={commandError} testID="job-command-error" />
       ) : null}
-
-      {!finished ? (
-        <View style={styles.commands}>
-          {job.state === 'drawing' ? (
-            <Button
-              label={t('job.pause')}
-              variant="secondary"
-              onPress={() => onCommand('pause')}
-              testID="job-pause"
-            />
-          ) : null}
-          {job.state === 'paused' ? (
-            <Button
-              label={t('job.resume')}
-              onPress={() => onCommand('resume')}
-              testID="job-resume"
-            />
-          ) : null}
-          <Button label={t('job.stop')} variant="ghost" onPress={confirmStop} testID="job-stop" />
-        </View>
-      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  stage: { alignItems: 'center' },
   status: { gap: spacing.xs, alignItems: 'center' },
   commands: { gap: spacing.sm },
 });

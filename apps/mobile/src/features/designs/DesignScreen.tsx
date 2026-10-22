@@ -1,21 +1,22 @@
-import type { DesignDetail, DrawingJob } from '@athar/contracts';
+import type { DesignDetail, DrawingJob, TableGeometry } from '@athar/contracts';
 import { useEffect, type ReactElement } from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { ApiError } from '../../api/http-client';
 import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
 import { DesignPreview } from '../../components/DesignPreview';
+import { DotRule } from '../../components/DotRule';
 import { ErrorState } from '../../components/ErrorState';
-import { LoadingState } from '../../components/LoadingState';
-import { ModeBadge } from '../../components/ModeBadge';
-import { FadeIn } from '../../components/FadeIn';
+import { FadeIn, staggerDelay } from '../../components/FadeIn';
 import { Icon } from '../../components/Icon';
+import { LoadingState } from '../../components/LoadingState';
 import { Screen } from '../../components/Screen';
 import { useTheme } from '../../components/use-theme';
 import { describeDuration } from '../../i18n/format-duration';
 import { useI18n } from '../../i18n/context';
 import { localize } from '../../i18n/locale';
-import { radius, shadows, spacing } from '../../theme';
+import { spacing } from '../../theme';
 import { useStartJob } from '../jobs/useStartJob';
 import { useTable } from '../tables/useTable';
 import { useDesign } from './useDesign';
@@ -28,7 +29,7 @@ export interface DesignScreenProps {
   readonly onWatchJob: (jobId: string) => void;
 }
 
-/** One design in full, and the button that starts it. */
+/** One design in full, and the button, pinned at the bottom, that starts it. */
 export function DesignScreen({
   tableId,
   designId,
@@ -78,102 +79,75 @@ export function DesignScreen({
   const runningJobId = refusedAsBusy ? (knownTable?.activeJobId ?? null) : null;
 
   return (
-    <Screen testID="design-screen">
-      <DesignDetails design={design.state.data} mode={knownTable?.mode} />
+    <Screen
+      testID="design-screen"
+      footer={
+        <>
+          {runningJobId !== null ? (
+            <Button
+              label={t('design.watchRunning')}
+              variant="secondary"
+              onPress={() => {
+                onWatchJob(runningJobId);
+              }}
+              testID="design-watch"
+            />
+          ) : null}
+          <Button
+            label={t('design.start')}
+            dot
+            loading={startState.status === 'starting'}
+            onPress={async () => {
+              const job = await start();
+
+              if (job !== undefined) {
+                onStarted(job);
+              }
+            }}
+            testID="design-start"
+          />
+        </>
+      }
+    >
+      <DesignDetails design={design.state.data} geometry={knownTable?.geometry} />
 
       {startState.status === 'error' ? (
         <ErrorState error={startState.error} testID="design-start-error" />
       ) : null}
-
-      {runningJobId !== null ? (
-        <Button
-          label={t('design.watchRunning')}
-          variant="secondary"
-          onPress={() => {
-            onWatchJob(runningJobId);
-          }}
-          testID="design-watch"
-        />
-      ) : null}
-
-      <Button
-        label={t('design.start')}
-        loading={startState.status === 'starting'}
-        onPress={async () => {
-          const job = await start();
-
-          if (job !== undefined) {
-            onStarted(job);
-          }
-        }}
-        testID="design-start"
-      />
     </Screen>
   );
 }
 
 function DesignDetails({
   design,
-  mode,
+  geometry,
 }: {
   readonly design: DesignDetail;
-  readonly mode: unknown;
+  /** The table's shape and size; round until the table has loaded. */
+  readonly geometry: TableGeometry | undefined;
 }): ReactElement {
   const { locale, t } = useI18n();
   const theme = useTheme();
   const duration = describeDuration(design.estimatedDurationSeconds, locale);
-  const inspiration = design.inspiration;
-  const label =
-    inspiration.kind === 'documented-traditional'
-      ? t('design.inspiration.traditional')
-      : t('design.inspiration.modern');
 
   return (
     <View style={styles.details}>
-      <FadeIn style={styles.disc}>
-        <DesignPreview path={design.previewPath} testID="design-preview" />
+      <FadeIn>
+        <Card tone="glow" padding="md" style={styles.disc}>
+          <DesignPreview path={design.previewPath} geometry={geometry} testID="design-preview" />
+        </Card>
       </FadeIn>
 
-      <FadeIn delay={120} style={styles.heading}>
-        <ModeBadge mode={mode} testID="design-mode" />
+      <FadeIn delay={staggerDelay(1)} style={styles.heading}>
         <AppText variant="display">{localize(design.title, locale)}</AppText>
         <AppText tone="textMuted">{localize(design.description, locale)}</AppText>
+        <DotRule />
       </FadeIn>
 
-      <FadeIn
-        delay={220}
-        style={[
-          styles.card,
-          shadows.soft,
-          { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow },
-        ]}
-      >
-        <View style={[styles.cardBar, { backgroundColor: theme.gold }]} />
-        <View style={styles.cardBody}>
-          <AppText variant="label" tone="accentText" testID="design-inspiration-label">
-            {label}
-          </AppText>
-          <AppText tone="textMuted">{localize(inspiration.note, locale)}</AppText>
-
-          {inspiration.sources.length > 0 ? (
-            <View style={styles.block}>
-              <AppText variant="label" tone="textMuted">
-                {t('design.sources')}
-              </AppText>
-              {inspiration.sources.map((source) => (
-                <SourceLine
-                  key={`${source.label}-${source.url ?? ''}`}
-                  label={source.label}
-                  url={source.url}
-                />
-              ))}
-            </View>
-          ) : null}
+      <FadeIn delay={staggerDelay(2)} style={styles.duration}>
+        <View style={[styles.durationIcon, { borderColor: theme.gold }]}>
+          <Icon name="clock" color={theme.gold} size={20} />
         </View>
-      </FadeIn>
-
-      <FadeIn delay={300} style={styles.duration}>
-        <Icon name="clock" color={theme.gold} size={20} />
         <View>
           <AppText variant="caption" tone="textMuted">
             {t('design.estimated')}
@@ -187,45 +161,17 @@ function DesignDetails({
   );
 }
 
-function SourceLine({
-  label,
-  url,
-}: {
-  readonly label: string;
-  readonly url: string | undefined;
-}): ReactElement {
-  if (url === undefined) {
-    return <AppText variant="caption">{label}</AppText>;
-  }
-
-  return (
-    <Pressable
-      accessibilityRole="link"
-      onPress={() => {
-        // A source link is a courtesy; if the phone cannot open it, nothing is lost.
-        Linking.openURL(url).catch(() => undefined);
-      }}
-    >
-      <AppText variant="caption" tone="accentText" style={styles.link}>
-        {label}
-      </AppText>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   details: { gap: spacing.lg },
-  disc: { paddingHorizontal: spacing.md },
+  disc: { alignItems: 'center' },
   heading: { gap: spacing.sm, alignItems: 'flex-start' },
-  card: {
-    flexDirection: 'row',
-    borderRadius: radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  cardBar: { width: 5 },
-  cardBody: { flex: 1, padding: spacing.lg, gap: spacing.sm },
-  block: { gap: spacing.xs, marginTop: spacing.sm },
   duration: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  link: { textDecorationLine: 'underline' },
+  durationIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

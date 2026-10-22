@@ -46,6 +46,7 @@ const MESSAGE_BY_CODE: Readonly<Record<ApiErrorCode, ErrorMessageKey>> = {
   FEATURE_NOT_IN_PLAN: 'error.lightNotIncluded',
   // Pairing and custom designs (nothing in the app can meet `DESIGN_READ_ONLY` yet).
   PAIRING_TOKEN_INVALID: 'error.pairingTokenInvalid',
+  PAIRING_WRONG_ACCOUNT: 'error.pairingWrongAccount',
   TABLE_ALREADY_CLAIMED: 'error.tableAlreadyClaimed',
   DESIGN_READ_ONLY: 'error.generic',
 };

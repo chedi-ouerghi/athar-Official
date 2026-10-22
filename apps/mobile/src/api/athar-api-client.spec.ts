@@ -74,6 +74,7 @@ const TABLE = {
   activeJobId: null,
   plan: 'basic',
   voiceAssistant: false,
+  geometry: { shape: 'oval', widthMm: 1000, heightMm: 600 },
   features: ['catalogue', 'rake'],
   ambienceId: null,
   readiness: { paired: true, online: true, free: true, canStart: true },

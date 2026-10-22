@@ -1,12 +1,17 @@
 import type { LightInput } from '@athar/contracts';
 import { useRef, useState, type ReactElement } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { errorMessageKey } from '../../api/error-messages';
 import { AppText } from '../../components/AppText';
 import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { Field } from '../../components/Field';
+import { Icon } from '../../components/Icon';
+import { PressableScale } from '../../components/PressableScale';
+import { ProgressBar } from '../../components/ProgressBar';
 import { useTheme } from '../../components/use-theme';
 import { useI18n } from '../../i18n/context';
-import { MIN_TOUCH_TARGET, radius, spacing, typography } from '../../theme';
+import { MIN_TOUCH_TARGET, radius, spacing } from '../../theme';
 import { BRIGHTNESS_STEP, SWATCHES, normaliseHex, stepBrightness } from './light-state';
 import { useSetLight } from './useSetLight';
 
@@ -71,56 +76,74 @@ export function LightControl({ tableId }: { readonly tableId: string }): ReactEl
   };
 
   return (
-    <View style={styles.container} testID="light-control">
-      <AppText variant="heading">{t('light.title')}</AppText>
-
-      <View style={styles.row}>
-        <Button
-          label={t('light.off')}
-          variant={shown?.mode === 'off' ? 'primary' : 'secondary'}
-          onPress={() => {
-            apply({ mode: 'off' });
-          }}
-          testID="light-off"
-        />
-        <Button
-          label={t('light.on')}
-          variant={shown?.mode === 'on' ? 'primary' : 'secondary'}
-          onPress={() => {
-            apply({ mode: 'on' });
-          }}
-          testID="light-on"
-        />
+    <Card style={styles.container} testID="light-control">
+      <View style={styles.title}>
+        <Icon name="bulb" color={theme.gold} size={22} />
+        <AppText variant="heading">{t('light.title')}</AppText>
       </View>
 
       <View style={styles.row}>
-        {SWATCHES.map((swatch) => (
-          <Pressable
-            key={swatch}
-            accessibilityRole="button"
-            accessibilityLabel={swatch}
-            accessibilityState={{ selected: color === swatch }}
+        <View style={styles.half}>
+          <Button
+            label={t('light.off')}
+            variant={shown?.mode === 'off' ? 'primary' : 'secondary'}
             onPress={() => {
-              setHex('');
-              chooseColor(swatch);
+              apply({ mode: 'off' });
             }}
-            style={[
-              styles.swatch,
-              {
-                backgroundColor: swatch,
-                borderColor: color === swatch ? theme.text : theme.border,
-                borderWidth: color === swatch ? 3 : 1,
-              },
-            ]}
-            testID={`light-swatch-${swatch}`}
+            testID="light-off"
           />
-        ))}
+        </View>
+        <View style={styles.half}>
+          <Button
+            label={t('light.on')}
+            variant={shown?.mode === 'on' ? 'primary' : 'secondary'}
+            onPress={() => {
+              apply({ mode: 'on' });
+            }}
+            testID="light-on"
+          />
+        </View>
       </View>
 
-      <TextInput
-        accessibilityLabel={t('light.hexLabel')}
-        autoCapitalize="none"
-        autoCorrect={false}
+      <View style={styles.swatches}>
+        {SWATCHES.map((swatch) => {
+          const selected = color === swatch;
+
+          return (
+            <PressableScale
+              key={swatch}
+              accessibilityRole="button"
+              accessibilityLabel={swatch}
+              accessibilityState={{ selected }}
+              onPress={() => {
+                setHex('');
+                chooseColor(swatch);
+              }}
+              scaleTo={0.9}
+              style={[
+                styles.swatch,
+                {
+                  backgroundColor: swatch,
+                  borderColor: selected ? theme.text : theme.border,
+                  borderWidth: selected ? 3 : 1,
+                  shadowColor: swatch,
+                  shadowOpacity: selected ? 0.6 : 0,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: selected ? 6 : 0,
+                },
+              ]}
+              testID={`light-swatch-${swatch}`}
+            >
+              {null}
+            </PressableScale>
+          );
+        })}
+      </View>
+
+      <Field
+        invalid={hexInvalid}
+        label={t('light.hexLabel')}
         maxLength={7}
         onChangeText={(text) => {
           setHex(text);
@@ -132,16 +155,6 @@ export function LightControl({ tableId }: { readonly tableId: string }): ReactEl
           }
         }}
         placeholder="#ff8800"
-        placeholderTextColor={theme.textMuted}
-        style={[
-          styles.input,
-          typography.body,
-          {
-            color: theme.text,
-            backgroundColor: theme.surface,
-            borderColor: hexInvalid ? theme.danger : theme.border,
-          },
-        ]}
         testID="light-hex"
         value={hex}
       />
@@ -159,23 +172,28 @@ export function LightControl({ tableId }: { readonly tableId: string }): ReactEl
       <AppText tone="textMuted" testID="light-brightness">
         {t('light.brightness', { percent: `${brightness}%` })}
       </AppText>
+      <ProgressBar progress={brightness / 100} />
       <View style={styles.row}>
-        <Button
-          label={t('light.dimmer')}
-          variant="secondary"
-          onPress={() => {
-            changeBrightness(-BRIGHTNESS_STEP);
-          }}
-          testID="light-dimmer"
-        />
-        <Button
-          label={t('light.brighter')}
-          variant="secondary"
-          onPress={() => {
-            changeBrightness(BRIGHTNESS_STEP);
-          }}
-          testID="light-brighter"
-        />
+        <View style={styles.half}>
+          <Button
+            label={t('light.dimmer')}
+            variant="secondary"
+            onPress={() => {
+              changeBrightness(-BRIGHTNESS_STEP);
+            }}
+            testID="light-dimmer"
+          />
+        </View>
+        <View style={styles.half}>
+          <Button
+            label={t('light.brighter')}
+            variant="secondary"
+            onPress={() => {
+              changeBrightness(BRIGHTNESS_STEP);
+            }}
+            testID="light-brighter"
+          />
+        </View>
       </View>
 
       {error !== undefined ? (
@@ -183,18 +201,15 @@ export function LightControl({ tableId }: { readonly tableId: string }): ReactEl
           {`${t('light.failed')}. ${t(errorMessageKey(error))}`}
         </AppText>
       ) : null}
-    </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { gap: spacing.md, marginTop: spacing.md },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  container: { gap: spacing.md },
+  title: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  row: { flexDirection: 'row', gap: spacing.sm },
+  half: { flex: 1 },
+  swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   swatch: { width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET, borderRadius: radius.pill },
-  input: {
-    minHeight: MIN_TOUCH_TARGET,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    paddingHorizontal: spacing.md,
-  },
 });

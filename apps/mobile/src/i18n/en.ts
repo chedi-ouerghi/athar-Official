@@ -47,19 +47,21 @@ export const en = {
   'designPreview.label': 'Design preview',
   'designPreview.labelWithProgress': 'Design preview, {percent} drawn',
 
-  'home.tagline': 'Watch patterns take shape in the sand.',
+  'home.tagline':
+    'An art table whose sand drawings keep changing, made to become the heart of a room.',
   'home.scan': 'Scan your table',
-  'home.enterCode': 'Enter table code',
+  'home.enterCode': 'Enter the link instead',
   'home.diagnostics': 'Connection details',
 
-  'code.label': 'Table code or link',
-  'code.placeholder': 'For example k7q3x9m2d8r5t6w4',
-  'code.submit': 'Open table',
-  'code.invalid': 'That code is not valid. Check it and try again.',
+  'code.label': 'Link from your table',
+  'code.placeholder': 'Paste the link that came with your table',
+  'code.submit': 'Connect my table',
+  'code.invalid': 'That is not the link made for your table. Check it and try again.',
 
   'scan.title': 'Scan the QR code on your table',
   'scan.hint': 'Point the camera at the code on the table.',
-  'scan.unrecognised': 'That is not an ATHAR table code. Try the code on your table.',
+  'scan.unrecognised':
+    'That is not the code made for your table. Scan the QR code that came with it.',
   'scan.permission.title': 'Camera access',
   'scan.permission.explain':
     'ATHAR uses the camera only to read the QR code on your table. Nothing is recorded or saved.',
@@ -67,7 +69,7 @@ export const en = {
   'scan.permission.denied':
     'Camera access is off. You can turn it on in your settings, or enter the table code instead.',
   'scan.permission.settings': 'Open settings',
-  'scan.enterInstead': 'Enter the table code instead',
+  'scan.enterInstead': 'Enter the link instead',
 
   'table.status': 'Status',
   'table.connection.online': 'Ready to draw',
@@ -85,6 +87,10 @@ export const en = {
   'table.busy.title': 'This table is drawing',
   'table.busy.body':
     'Someone is already drawing here. You can watch it, or come back when it has finished.',
+  'table.shape.round': 'Round table, {diameter} mm across',
+  'table.shape.square': 'Square table, {side} mm',
+  'table.shape.rectangle': 'Rectangular table, {width} × {height} mm',
+  'table.shape.oval': 'Oval table, {width} × {height} mm',
   'table.watch': 'Watch the drawing',
 
   'duration.minutes': 'About {value} min',
@@ -147,6 +153,8 @@ export const en = {
 
   'error.pairingTokenInvalid':
     'This code is no longer valid. Ask the table owner for a new invitation.',
+  'error.pairingWrongAccount':
+    'This code was made for a different account. Sign in with the account it was made for.',
   'error.tableAlreadyClaimed':
     'This table already belongs to someone else. Ask its owner to invite you.',
   'error.invalidCredentials': 'The email or password is not right.',
@@ -156,7 +164,7 @@ export const en = {
   'error.notAllowed': 'You are not allowed to do that on this table.',
   'error.lightNotIncluded': 'Your table does not include coloured light.',
   'error.reconnect': 'The connection to the table lapsed. Please try again.',
-  'signIn.title': 'Welcome to ATHAR',
+  'signIn.title': 'Welcome to *ATHAR*',
   'signIn.email': 'Email',
   'signIn.password': 'Password',
   'signIn.submit': 'Sign in',
@@ -183,6 +191,32 @@ export const en = {
   'share.send': 'Send the invitation again',
   'share.message': 'Join my ATHAR table: {link}',
   'share.failed': 'The invitation could not be created',
+
+  'tabs.home': 'Home',
+  'tabs.scan': 'Scan',
+  'tabs.account': 'Account',
+
+  'home.greeting': 'Welcome back',
+  'home.heroTitle': 'Art in motion, a trace that *endures*.',
+  'home.recent': 'Pick up where you left off',
+  'home.recentOpen': 'Open this table',
+
+  'account.title': 'Your *account*',
+  'account.role.admin': 'Administrator',
+  'account.role.customer': 'Customer',
+  'account.appearance': 'Appearance',
+  'account.theme.system': 'Automatic',
+  'account.theme.light': 'Light',
+  'account.theme.dark': 'Dark',
+
+  'signIn.subtitle': 'Sign in to control your sand table.',
+  'signIn.tab.signIn': 'Sign in',
+  'signIn.tab.activate': 'Activate',
+  'signIn.showPassword': 'Show password',
+  'signIn.hidePassword': 'Hide password',
+
+  'table.lightAndShare': 'Light and sharing',
+  'table.designsCount': '{count} designs',
 } as const;
 
 export type TranslationKey = keyof typeof en;
