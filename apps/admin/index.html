@@ -1,0 +1,1369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ATHAR Admin</title>
+    <style>
+      :root {
+        --bg: #f5efe3;
+        --card: #fffaf0;
+        --ink: #2a1f14;
+        --muted: #6b5d4d;
+        --line: #e0d4bc;
+        --accent: #8c5a2b;
+        --on-accent: #fff;
+        --danger: #b3261e;
+        --ok: #2e6b3a;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1712;
+          --card: #262019;
+          --ink: #f1e8d8;
+          --muted: #b4a590;
+          --line: #3a3228;
+          --accent: #d9a066;
+          --on-accent: #1c1712;
+          --danger: #ff8a80;
+          --ok: #7fcf8f;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.45 system-ui,
+          sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+      header h1 {
+        font-size: 18px;
+        margin: 0;
+        letter-spacing: 0.2em;
+      }
+      header .spacer {
+        flex: 1;
+      }
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px;
+        display: grid;
+        gap: 24px;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 20px;
+        overflow-x: auto;
+      }
+      .head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .head h2 {
+        margin: 0;
+        flex: 1;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: end;
+        margin-bottom: 14px;
+      }
+      form.stack {
+        flex-direction: column;
+        align-items: stretch;
+        margin: 0;
+      }
+      label {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      label.inline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        color: var(--ink);
+      }
+      fieldset {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin: 0;
+        padding: 10px 12px;
+      }
+      legend {
+        font-size: 12px;
+        color: var(--muted);
+        padding: 0 6px;
+      }
+      input,
+      select {
+        font: inherit;
+        color: var(--ink);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        min-height: 40px;
+      }
+      input[type='radio'],
+      input[type='checkbox'] {
+        min-height: 0;
+        accent-color: var(--accent);
+      }
+      button {
+        font: inherit;
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: var(--on-accent);
+        border-radius: 8px;
+        padding: 8px 14px;
+        min-height: 40px;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: transparent;
+        color: var(--accent);
+      }
+      button.danger {
+        background: transparent;
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      td button {
+        min-height: 32px;
+        padding: 4px 10px;
+        font-size: 13px;
+        margin-right: 4px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 99px;
+        font-size: 12px;
+        border: 1px solid var(--line);
+      }
+      .badge.active,
+      .badge.on {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .badge.disabled,
+      .badge.off {
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+      #error {
+        color: var(--danger);
+        min-height: 1.4em;
+        margin: 0;
+      }
+      #login {
+        max-width: 360px;
+        margin: 12vh auto;
+        padding: 0 16px;
+      }
+      #login form {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      dialog {
+        background: var(--card);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        max-width: 620px;
+        width: calc(100% - 32px);
+        max-height: 92vh;
+      }
+      dialog::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+      }
+      code,
+      pre {
+        font:
+          13px ui-monospace,
+          Consolas,
+          monospace;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 2px 6px;
+        word-break: break-all;
+        white-space: pre-wrap;
+      }
+      pre {
+        padding: 10px;
+      }
+      td code {
+        white-space: nowrap;
+        word-break: normal;
+      }
+      #filter {
+        min-width: 280px;
+      }
+      #qr {
+        display: grid;
+        place-items: center;
+        padding: 12px;
+        background: #fff;
+        border-radius: 8px;
+        margin: 10px 0;
+        color: #000;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 14px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .shapes {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .shape {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        padding: 8px 4px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--ink);
+      }
+      .shape:has(input:checked) {
+        border-color: var(--accent);
+        background: var(--bg);
+        outline: 1px solid var(--accent);
+      }
+      .shape input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .shape:has(input:focus-visible) {
+        outline: 2px solid var(--accent);
+      }
+      .geo {
+        display: grid;
+        grid-template-columns: 1fr 200px;
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 560px) {
+        .geo {
+          grid-template-columns: 1fr;
+        }
+        .shapes {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .geo .fields {
+        display: grid;
+        gap: 10px;
+      }
+      .geo svg {
+        width: 100%;
+        height: auto;
+      }
+      .geo-note {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 0;
+      }
+      .geo-error {
+        color: var(--danger);
+        font-size: 13px;
+        min-height: 1.3em;
+        margin: 0;
+      }
+      .sh {
+        vertical-align: middle;
+        margin-right: 8px;
+      }
+      .sh .body {
+        fill: var(--bg);
+        stroke: var(--accent);
+        stroke-width: 2;
+      }
+      .sh .area {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1;
+        stroke-dasharray: 3 3;
+      }
+      .badge.warn {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .badge.unknown {
+        color: var(--muted);
+      }
+      .steps {
+        margin: 0 0 14px;
+        padding-left: 20px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .empty {
+        text-align: center;
+        color: var(--muted);
+        padding: 18px 10px;
+        white-space: normal;
+      }
+      .hint {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 4px 0 0;
+      }
+      .copyrow {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: start;
+        margin: 6px 0 10px;
+      }
+      .copyrow pre {
+        margin: 0;
+      }
+      .copyrow button {
+        min-height: 32px;
+        padding: 4px 10px;
+        font-size: 13px;
+      }
+      .notice {
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin: 8px 0;
+        font-size: 14px;
+      }
+      .lbl {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 10px 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <section>
+        <h2>ATHAR Admin</h2>
+        <form id="login-form">
+          <label>
+            Where is the API?
+            <input id="api" value="http://localhost:3000" required />
+            <span class="hint"
+              >On the Raspberry Pi test setup: http://&lt;Pi address&gt;:3000, for example
+              http://athar-pi.local:3000. Open this page from http://localhost:&lt;port&gt;, not as
+              a file.</span
+            >
+          </label>
+          <label
+            >Admin email <input id="email" type="email" autocomplete="username" required
+          /></label>
+          <label
+            >Password <input id="password" type="password" autocomplete="current-password" required
+          /></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <p id="login-error" class="muted" role="alert"></p>
+      </section>
+    </div>
+
+    <div id="app" hidden>
+      <header>
+        <h1>ATHAR</h1>
+        <span class="muted" id="who"></span><span class="spacer"></span>
+        <button class="secondary" id="refresh">Refresh now</button>
+        <button class="secondary" id="logout">Sign out</button>
+      </header>
+      <main>
+        <p id="error" role="alert"></p>
+        <section>
+          <h2>How it works</h2>
+          <ol class="steps">
+            <li>Create the <b>customer</b> who will own the table (section 1).</li>
+            <li>
+              <b>Provision a table</b> for that customer (section 2). Copy the table id and the
+              broker login shown there: they appear only once.
+            </li>
+            <li>
+              Register the table on the broker with the command shown, then check that the table
+              says <b>Online</b>.
+            </li>
+            <li>Give the customer the <b>pairing QR code</b>. Only that customer can use it.</li>
+          </ol>
+        </section>
+        <section>
+          <h2>1. Customers</h2>
+          <form id="customer-form">
+            <label>Customer email <input name="email" type="email" required /></label>
+            <label>Customer name <input name="displayName" required maxlength="100" /></label>
+            <button type="submit">Create customer</button>
+          </form>
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="customers"></tbody>
+          </table>
+        </section>
+        <section>
+          <div class="head">
+            <h2>2. Tables <span class="muted" id="table-count"></span></h2>
+            <input
+              id="filter"
+              type="search"
+              placeholder="Search by name, place, shape or owner"
+              aria-label="Search tables"
+            />
+            <button id="provision">Provision a table</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Table id</th>
+                <th>Name</th>
+                <th>Location</th>
+                <th>Shape and size (X × Y)</th>
+                <th>Plan</th>
+                <th>Owner</th>
+                <th>Online?</th>
+                <th>Enabled?</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tables"></tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="dialog">
+      <div id="dialog-body"></div>
+      <div class="row" id="dialog-actions"></div>
+    </dialog>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script>
+      // Token lives in memory only: closing or reloading the tab signs out.
+      let base = '',
+        token = '',
+        customers = [],
+        tables = [];
+      const $ = (id) => document.getElementById(id);
+      const el = (tag, props = {}, ...kids) => {
+        const n = Object.assign(document.createElement(tag), props);
+        n.append(...kids);
+        return n;
+      };
+      const svgEl = (tag, attrs = {}) => {
+        const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+        return n;
+      };
+
+      // The server validates every rule below again; these mirror packages/contracts/src/geometry.ts for instant feedback.
+      const MIN_MM = 100,
+        MAX_MM = 10000;
+      const SHAPES = {
+        round: { label: 'Round', equal: true, dims: ['Diameter (mm)'] },
+        square: { label: 'Square', equal: true, dims: ['Side (mm)'] },
+        rectangle: { label: 'Rectangle', equal: false, dims: ['Width X (mm)', 'Height Y (mm)'] },
+        oval: { label: 'Oval', equal: false, dims: ['Width X (mm)', 'Height Y (mm)'] },
+      };
+
+      // Plain-language versions of the API error codes. Anything else shows the API's own message.
+      const FRIENDLY = {
+        INVALID_CREDENTIALS: 'Wrong email or password.',
+        UNAUTHORIZED: 'You are signed out. Sign in again.',
+        SESSION_EXPIRED: 'Your session has ended. Sign in again.',
+        FORBIDDEN: 'This account is not allowed to do that.',
+        TOO_MANY_REQUESTS: 'Too many attempts. Wait a minute, then try again.',
+        ACCOUNT_EXISTS: 'An account with this email already exists.',
+        TABLE_NOT_FOUND: 'This table does not exist (any more). Press "Refresh now".',
+        TABLE_ALREADY_CLAIMED:
+          'This table already has an owner, so a new pairing code is not needed.',
+      };
+
+      async function api(method, path, body) {
+        let res;
+        try {
+          res = await fetch(`${base}/api/v1${path}`, {
+            method,
+            headers: {
+              'content-type': 'application/json',
+              ...(token ? { authorization: `Bearer ${token}` } : {}),
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          });
+        } catch {
+          throw new Error(
+            `Cannot reach the API at ${base}. Check that: (1) the API is running, (2) the address is right, (3) you opened this page from http://localhost:<port> (the API only accepts pages from localhost, or from an address listed in CORS_ORIGINS).`,
+          );
+        }
+        if (res.status === 204) return null;
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const code = json.error?.code ?? String(res.status);
+          const text = FRIENDLY[code] ?? json.error?.message ?? res.statusText;
+          throw new Error(`${text} (${code})`);
+        }
+        return json;
+      }
+
+      // Copy to the clipboard, with a fallback for browsers that refuse it.
+      async function copyText(text, button) {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          const area = el('textarea', { value: text });
+          document.body.append(area);
+          area.select();
+          document.execCommand('copy');
+          area.remove();
+        }
+        button.textContent = 'Copied';
+        setTimeout(() => (button.textContent = 'Copy'), 1500);
+      }
+      // A labelled value in a box, with a Copy button.
+      const copyRow = (label, text) => [
+        el('p', { className: 'lbl', textContent: label }),
+        el(
+          'div',
+          { className: 'copyrow' },
+          el('pre', { textContent: text }),
+          el('button', {
+            type: 'button',
+            className: 'secondary',
+            textContent: 'Copy',
+            onclick: (ev) => copyText(text, ev.currentTarget),
+          }),
+        ),
+      ];
+      // The commands that give a table its login on the broker (hardware guide, step D2).
+      const brokerCommand = (id) =>
+        [
+          'cd ~/athar-Official/deploy',
+          `docker run --rm -it -v "$PWD/mosquitto:/m" eclipse-mosquitto:2 mosquitto_passwd /m/passwd ${id}`,
+          'sudo chown 1883:1883 mosquitto/passwd && sudo chmod 600 mosquitto/passwd',
+          'athar restart mosquitto',
+        ].join('\n');
+
+      // Online state of each table, from GET /tables/:id (an admin may read any table).
+      const STATE_LABEL = {
+        online: ['Online', 'on'],
+        busy: ['Online, drawing', 'on'],
+        offline: ['Offline', 'off'],
+        error: ['Error', 'off'],
+        unknown: ['Unknown', 'unknown'],
+      };
+      let states = new Map(),
+        refreshTimer = null;
+      async function refreshStates() {
+        await Promise.all(
+          tables.map(async (t) => {
+            try {
+              states.set(t.id, (await api('GET', `/tables/${t.id}`)).connection);
+            } catch {
+              states.set(t.id, 'unknown');
+            }
+          }),
+        );
+        render();
+      }
+      const stateBadge = (id) => {
+        const [text, cls] = STATE_LABEL[states.get(id)] ?? STATE_LABEL.unknown;
+        return el('span', { className: `badge ${cls}`, textContent: text });
+      };
+      const showError = (e) => {
+        $('error').textContent = e ? e.message : '';
+      };
+      const run = async (fn) => {
+        try {
+          showError(null);
+          await fn();
+        } catch (e) {
+          showError(e);
+        }
+      };
+
+      function dialog(title, nodes, actions) {
+        $('dialog-body').replaceChildren(el('h2', { textContent: title }), ...nodes);
+        $('dialog-actions').replaceChildren(
+          ...(actions ?? [
+            el('button', {
+              className: 'secondary',
+              textContent: 'Close',
+              onclick: () => $('dialog').close(),
+            }),
+          ]),
+        );
+        if (!$('dialog').open) $('dialog').showModal();
+      }
+      const cancelButton = () =>
+        el('button', {
+          type: 'button',
+          className: 'secondary',
+          textContent: 'Cancel',
+          onclick: () => $('dialog').close(),
+        });
+
+      // A table drawn to scale: its outline, and for a square or rectangle the ellipse where designs are drawn.
+      function shapeSvg(shape, widthMm, heightMm, size) {
+        const longest = Math.max(widthMm, heightMm),
+          pad = 4;
+        const w = (size - 2 * pad) * (widthMm / longest),
+          h = (size - 2 * pad) * (heightMm / longest);
+        const cx = size / 2,
+          cy = size / 2;
+        const svg = svgEl('svg', {
+          viewBox: `0 0 ${size} ${size}`,
+          width: size,
+          height: size,
+          class: 'sh',
+          'aria-hidden': 'true',
+        });
+        if (shape === 'round') svg.append(svgEl('circle', { class: 'body', cx, cy, r: w / 2 }));
+        else if (shape === 'oval')
+          svg.append(svgEl('ellipse', { class: 'body', cx, cy, rx: w / 2, ry: h / 2 }));
+        else
+          svg.append(
+            svgEl('rect', {
+              class: 'body',
+              x: cx - w / 2,
+              y: cy - h / 2,
+              width: w,
+              height: h,
+              rx: 3,
+            }),
+          );
+        if (shape === 'square' || shape === 'rectangle')
+          svg.append(svgEl('ellipse', { class: 'area', cx, cy, rx: w / 2, ry: h / 2 }));
+        return svg;
+      }
+      const geometryText = (g) =>
+        g.shape === 'round'
+          ? `Round Ø ${g.widthMm} mm`
+          : g.shape === 'square'
+            ? `Square ${g.widthMm} mm`
+            : `${SHAPES[g.shape].label} ${g.widthMm} × ${g.heightMm} mm`;
+
+      // Shape picker + X/Y fields + live preview. `read()` returns a geometry or throws the reason it is invalid.
+      function geometryEditor(initial) {
+        const uid = Math.random().toString(36).slice(2);
+        let shape = initial.shape;
+        const w = el('input', {
+          type: 'number',
+          min: MIN_MM,
+          max: MAX_MM,
+          step: 1,
+          required: true,
+          value: initial.widthMm,
+        });
+        const h = el('input', {
+          type: 'number',
+          min: MIN_MM,
+          max: MAX_MM,
+          step: 1,
+          required: true,
+          value: initial.heightMm,
+        });
+        const wLabel = el('label', {}, el('span'), w),
+          hLabel = el('label', {}, el('span'), h);
+        const error = el('p', { className: 'geo-error', role: 'alert' });
+        const preview = el('div');
+        const note = el('p', { className: 'geo-note' });
+
+        const read = () => {
+          const widthMm = Number(w.value),
+            heightMm = SHAPES[shape].equal ? widthMm : Number(h.value);
+          for (const [name, v] of [
+            ['Width X', widthMm],
+            ['Height Y', heightMm],
+          ]) {
+            if (!Number.isInteger(v) || v < MIN_MM || v > MAX_MM)
+              throw new Error(
+                `${name} must be a whole number of millimetres from ${MIN_MM} to ${MAX_MM}.`,
+              );
+          }
+          if (!SHAPES[shape].equal && widthMm === heightMm)
+            throw new Error(
+              `A ${shape} needs a width and a height that differ: with equal ones it is a ${shape === 'oval' ? 'round' : 'square'} table.`,
+            );
+          return { shape, widthMm, heightMm };
+        };
+        const refresh = () => {
+          const equal = SHAPES[shape].equal;
+          wLabel.firstChild.textContent = SHAPES[shape].dims[0];
+          if (!equal) hLabel.firstChild.textContent = SHAPES[shape].dims[1];
+          hLabel.hidden = equal;
+          if (equal) h.value = w.value;
+          try {
+            const g = read();
+            error.textContent = '';
+            preview.replaceChildren(
+              shapeSvg(g.shape, g.widthMm, g.heightMm, 180),
+              el('p', { className: 'geo-note', textContent: geometryText(g) }),
+            );
+          } catch (e) {
+            error.textContent = e.message;
+            preview.replaceChildren();
+          }
+          note.textContent = equal
+            ? 'One measure: the table is as wide as it is long.'
+            : 'X is the width and Y the height, seen from above. They must differ.';
+        };
+        const shapes = el(
+          'div',
+          { className: 'shapes' },
+          ...Object.entries(SHAPES).map(([key, s]) => {
+            const radio = el('input', {
+              type: 'radio',
+              name: `shape-${uid}`,
+              value: key,
+              checked: key === shape,
+              onchange: () => {
+                shape = key;
+                if (!SHAPES[key].equal && Number(w.value) === Number(h.value))
+                  h.value = Math.round(Number(w.value) * 0.66);
+                refresh();
+              },
+            });
+            return el(
+              'label',
+              { className: 'shape' },
+              radio,
+              shapeSvg(
+                key,
+                key === 'rectangle' || key === 'oval' ? 3 : 2,
+                key === 'rectangle' || key === 'oval' ? 2 : 2,
+                44,
+              ),
+              s.label,
+            );
+          }),
+        );
+        w.addEventListener('input', refresh);
+        h.addEventListener('input', refresh);
+        const node = el(
+          'fieldset',
+          {},
+          el('legend', { textContent: 'Table shape and size' }),
+          el(
+            'div',
+            { className: 'geo' },
+            el('div', { className: 'fields' }, shapes, wLabel, hLabel, note, error),
+            preview,
+          ),
+        );
+        refresh();
+        return { node, read };
+      }
+
+      async function load() {
+        const [c, t] = await Promise.all([
+          api('GET', '/admin/customers'),
+          api('GET', '/admin/tables'),
+        ]);
+        customers = c.customers;
+        tables = t.tables;
+        render();
+        refreshStates(); // not awaited: the lists show at once, the Online? column fills in
+        // The page keeps the Online? column fresh while it is open and visible.
+        clearInterval(refreshTimer);
+        refreshTimer = setInterval(() => {
+          if (!document.hidden) refreshStates();
+        }, 10000);
+      }
+      const accessDialog = (title, r) =>
+        dialog(title, [
+          el('p', {
+            textContent: `${r.account.email}: give this one-time activation code to the customer. It is shown only once:`,
+          }),
+          ...copyRow('Activation code', r.activationCode),
+        ]);
+      function qrNode(text) {
+        const box = el('div', { id: 'qr' });
+        if (window.QRCode)
+          new QRCode(box, { text, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+        else box.textContent = 'QR library unavailable (offline?). Use the link below.';
+        return box;
+      }
+      const linkBlock = (link) => [
+        qrNode(link),
+        el('p', {
+          className: 'muted',
+          textContent:
+            'The QR code holds only the pairing link below. Print it or show it on screen: the customer scans it in the Athar app.',
+        }),
+        ...copyRow('Pairing link', link),
+      ];
+      const customerName = (id) => customers.find((c) => c.id === id)?.email ?? id;
+      // A QR code is for one customer only, so a table is never made without choosing one.
+      const customerSelect = () =>
+        el(
+          'select',
+          { name: 'customerAccountId', required: true },
+          el('option', { value: '', textContent: 'Choose a customer…' }),
+          ...customers
+            .filter((c) => c.status !== 'disabled')
+            .map((c) =>
+              el('option', { value: c.id, textContent: `${c.displayName} (${c.email})` }),
+            ),
+        );
+
+      function render() {
+        const byId = new Map(customers.map((c) => [c.id, c]));
+        $('customers').replaceChildren(
+          ...customers.map((c) =>
+            el(
+              'tr',
+              {},
+              el('td', { textContent: c.email }),
+              el('td', { textContent: c.displayName }),
+              el(
+                'td',
+                {},
+                el('span', {
+                  className: `badge ${c.status === 'disabled' ? 'disabled' : 'active'}`,
+                  textContent: c.status,
+                }),
+              ),
+              el('td', { textContent: c.createdAt.slice(0, 10) }),
+              el(
+                'td',
+                {},
+                el('button', {
+                  className: 'secondary',
+                  textContent: 'New activation code',
+                  onclick: () =>
+                    run(async () => {
+                      if (confirm(`Sign ${c.email} out everywhere and issue a new code?`)) {
+                        accessDialog(
+                          'Access reset',
+                          await api('POST', `/admin/customers/${c.id}/reset-access`),
+                        );
+                        await load();
+                      }
+                    }),
+                }),
+                el('button', {
+                  className: 'danger',
+                  textContent: 'Disable',
+                  disabled: c.status === 'disabled',
+                  onclick: () =>
+                    run(async () => {
+                      if (confirm(`Disable ${c.email}? Their sessions end.`)) {
+                        await api('POST', `/admin/customers/${c.id}/disable`);
+                        await load();
+                      }
+                    }),
+                }),
+              ),
+            ),
+          ),
+        );
+
+        const emailOf = (id) => byId.get(id)?.email ?? id;
+        const ownerOf = (t) =>
+          t.ownerAccountId
+            ? emailOf(t.ownerAccountId)
+            : t.reservedForAccountId
+              ? `unclaimed, for ${emailOf(t.reservedForAccountId)}`
+              : 'unclaimed';
+        const needle = $('filter').value.trim().toLowerCase();
+        const shown = tables.filter(
+          (t) =>
+            !needle ||
+            [t.id, t.displayName, t.location, t.geometry.shape, t.plan, ownerOf(t)]
+              .join(' ')
+              .toLowerCase()
+              .includes(needle),
+        );
+        $('table-count').textContent =
+          `(${shown.length}${shown.length === tables.length ? '' : ` of ${tables.length}`})`;
+        $('tables').replaceChildren(
+          ...shown.map((t) =>
+            el(
+              'tr',
+              {},
+              el('td', {}, el('code', { textContent: t.id })),
+              el('td', { textContent: t.displayName }),
+              el('td', { textContent: t.location }),
+              el(
+                'td',
+                {},
+                shapeSvg(t.geometry.shape, t.geometry.widthMm, t.geometry.heightMm, 28),
+                geometryText(t.geometry),
+              ),
+              el('td', { textContent: t.plan + (t.voiceAssistant ? ' + voice' : '') }),
+              el('td', { textContent: ownerOf(t) }),
+              el('td', {}, stateBadge(t.id)),
+              el(
+                'td',
+                {},
+                el('span', {
+                  className: `badge ${t.enabled ? 'on' : 'off'}`,
+                  textContent: t.enabled ? 'Enabled' : 'Disabled',
+                }),
+              ),
+              el(
+                'td',
+                {},
+                el('button', { textContent: 'Details', onclick: () => detailsDialog(t) }),
+                el('button', {
+                  className: 'secondary',
+                  textContent: 'Configure',
+                  onclick: () => configureDialog(t),
+                }),
+                el('button', {
+                  className: 'secondary',
+                  textContent: t.enabled ? 'Disable' : 'Enable',
+                  onclick: () =>
+                    run(async () => {
+                      if (
+                        t.enabled &&
+                        !confirm(
+                          `Disable "${t.displayName}"? Nobody can start a drawing on it until you enable it again.`,
+                        )
+                      )
+                        return;
+                      await api('PATCH', `/admin/tables/${t.id}`, { enabled: !t.enabled });
+                      await load();
+                    }),
+                }),
+                el('button', {
+                  className: 'secondary',
+                  textContent: 'Pairing QR',
+                  disabled: !!t.ownerAccountId,
+                  title: t.ownerAccountId
+                    ? 'This table already has an owner'
+                    : 'Show the QR code the customer scans',
+                  onclick: () => run(() => claimDialog(t)),
+                }),
+              ),
+            ),
+          ),
+        );
+
+        // Empty states: say what to do next instead of showing a blank table.
+        const emptyRow = (columns, text) =>
+          el('tr', {}, el('td', { colSpan: columns, className: 'empty', textContent: text }));
+        if (customers.length === 0)
+          $('customers').replaceChildren(
+            emptyRow(5, 'No customers yet. Create the first one with the form above.'),
+          );
+        if (shown.length === 0)
+          $('tables').replaceChildren(
+            emptyRow(
+              9,
+              customers.length === 0
+                ? 'Create a customer first (section 1), then provision a table for them.'
+                : tables.length === 0
+                  ? 'No tables yet. Press "Provision a table".'
+                  : 'No table matches your search.',
+            ),
+          );
+      }
+
+      // One form for both registering a table and configuring an existing one. A new
+      // table (`forCustomer`) also asks whom its QR code is for.
+      function tableForm(t, onSubmit, submitLabel, forCustomer = false) {
+        const customer = forCustomer ? customerSelect() : null;
+        const name = el('input', {
+          name: 'displayName',
+          required: true,
+          maxLength: 100,
+          value: t?.displayName ?? '',
+        });
+        const location = el('input', {
+          name: 'location',
+          required: true,
+          maxLength: 200,
+          value: t?.location ?? '',
+        });
+        const plan = el(
+          'select',
+          { name: 'plan' },
+          ...['basic', 'personalized'].map((p) =>
+            el('option', { value: p, textContent: p, selected: p === (t?.plan ?? 'basic') }),
+          ),
+        );
+        const voice = el('input', { type: 'checkbox', checked: t?.voiceAssistant ?? false });
+        const geometry = geometryEditor(
+          t?.geometry ?? { shape: 'round', widthMm: 800, heightMm: 800 },
+        );
+        const message = el('p', { className: 'geo-error', role: 'alert' });
+        const form = el(
+          'form',
+          {
+            className: 'stack',
+            onsubmit: async (ev) => {
+              ev.preventDefault();
+              message.textContent = '';
+              try {
+                await onSubmit({
+                  displayName: name.value.trim(),
+                  location: location.value.trim(),
+                  plan: plan.value,
+                  voiceAssistant: voice.checked,
+                  geometry: geometry.read(),
+                  ...(customer ? { customerAccountId: customer.value } : {}),
+                });
+              } catch (e) {
+                message.textContent = e.message;
+              }
+            },
+          },
+          ...(customer
+            ? [
+                el(
+                  'label',
+                  {},
+                  'Customer (the only account that can pair this table with its QR code)',
+                  customer,
+                ),
+              ]
+            : []),
+          el('label', {}, 'Name', name),
+          el('label', {}, 'Location', location),
+          el('label', {}, 'Plan (LED ambiences and drawing pen are in "personalized")', plan),
+          el('label', { className: 'inline' }, voice, 'Voice assistant add-on'),
+          geometry.node,
+          message,
+          el(
+            'div',
+            { className: 'row' },
+            cancelButton(),
+            el('button', { type: 'submit', textContent: submitLabel }),
+          ),
+        );
+        return form;
+      }
+      function configureDialog(t) {
+        dialog(
+          `Configure ${t.displayName}`,
+          [
+            el(
+              'p',
+              { className: 'muted' },
+              'Id ',
+              el('code', { textContent: t.id }),
+              t.ownerAccountId ? ' (claimed)' : ' (unclaimed)',
+            ),
+            tableForm(
+              t,
+              async (patch) => {
+                await api('PATCH', `/admin/tables/${t.id}`, patch);
+                $('dialog').close();
+                await load();
+              },
+              'Save configuration',
+            ),
+          ],
+          [],
+        );
+      }
+      // What an admin needs to know about one table: its id, whether it is online, how to give it
+      // a broker login, and the pairing QR code while nobody owns it.
+      function detailsDialog(t) {
+        const state = states.get(t.id) ?? 'unknown';
+        const hints = {
+          online: 'The table controller is connected to the broker. All good.',
+          busy: 'The table is connected and drawing right now.',
+          offline:
+            'The table controller is not connected to the broker. Check that the table has power and network, that its broker username is the table id above and that the account exists on the broker (see below).',
+          error: 'The table reported an error. Look at the API and controller logs.',
+          unknown: 'The state could not be read. Press "Refresh now".',
+        };
+        dialog(
+          `Details: ${t.displayName}`,
+          [
+            ...copyRow('Table id (also its broker username)', t.id),
+            el('p', { className: 'lbl', textContent: 'State' }),
+            el('p', {}, stateBadge(t.id), ` ${hints[state] ?? hints.unknown}`),
+            el('p', { className: 'lbl', textContent: 'Where / owner' }),
+            el('p', {
+              textContent: `${t.location} · ${geometryText(t.geometry)} · plan ${t.plan} · ${
+                t.ownerAccountId
+                  ? `owned by ${customerName(t.ownerAccountId)}`
+                  : t.reservedForAccountId
+                    ? `waiting to be claimed by ${customerName(t.reservedForAccountId)}`
+                    : 'no owner'
+              }`,
+            }),
+            el('h2', { textContent: 'Broker login' }),
+            el('p', {
+              className: 'hint',
+              textContent:
+                'The broker password is shown only once, when the table is provisioned, and is not stored. If it is lost, choose a new one with these commands and give it to the table controller:',
+            }),
+            ...copyRow('Commands (run on the Pi)', brokerCommand(t.id)),
+            el('p', {
+              className: 'hint',
+              textContent:
+                'This uses the "athar" shortcut from the hardware guide (local test setup). For the Google Cloud setup, see deploy/README.md.',
+            }),
+          ],
+          [
+            el('button', {
+              type: 'button',
+              className: 'secondary',
+              textContent: 'Refresh state',
+              onclick: () => run(refreshStates).then(() => detailsDialog(t)),
+            }),
+            el('button', {
+              type: 'button',
+              className: 'secondary',
+              textContent: 'Close',
+              onclick: () => $('dialog').close(),
+            }),
+          ],
+        );
+      }
+      function provisionDialog() {
+        if (!customers.some((c) => c.status !== 'disabled')) {
+          dialog('Create a customer first', [
+            el('p', {
+              textContent:
+                'A table is made for one customer, and only that customer can pair it with the app. Create the customer in section 1, then come back.',
+            }),
+          ]);
+          return;
+        }
+        dialog(
+          'Provision a table',
+          [
+            tableForm(
+              null,
+              async (body) => {
+                const r = await api('POST', '/admin/tables/provision', body);
+                dialog(`Table created: ${r.table.displayName}`, [
+                  el('p', {
+                    className: 'notice',
+                    textContent:
+                      'Copy what you need now. The broker password and the pairing link are shown only once and are not stored.',
+                  }),
+                  el('h2', { textContent: 'A. The table' }),
+                  ...copyRow('Table id', r.table.id),
+                  el('p', {
+                    className: 'hint',
+                    textContent: `${geometryText(r.table.geometry)}. The id is also the table's broker username.`,
+                  }),
+                  el('h2', {
+                    textContent: 'B. Broker login for the table controller (Raspberry Pi)',
+                  }),
+                  ...copyRow('Broker username', r.mqtt.username),
+                  ...copyRow('Broker password (shown once)', r.mqtt.password),
+                  ...copyRow(
+                    'Broker address and port',
+                    `${r.mqtt.host}:${r.mqtt.port}${r.mqtt.tls ? ' (TLS)' : ' (no TLS)'}`,
+                  ),
+                  el('p', {
+                    className: 'hint',
+                    textContent:
+                      'This is the broker address as the API sees it. A controller on the same Raspberry Pi as the broker connects to 127.0.0.1 with the same port.',
+                  }),
+                  el('p', {
+                    className: 'lbl',
+                    textContent:
+                      'Register this table on the broker (run on the Pi, then type the password above when asked):',
+                  }),
+                  ...copyRow('Commands', brokerCommand(r.table.id)),
+                  el('h2', {
+                    textContent: `C. Pairing QR code for ${customerName(r.pairing.accountId)}`,
+                  }),
+                  ...linkBlock(r.pairing.link),
+                ]);
+                await load();
+              },
+              'Provision table',
+              true,
+            ),
+          ],
+          [],
+        );
+      }
+
+      // A new claim code for a table nobody owns yet, for its customer. A table made
+      // before codes were tied to a customer has none yet, so the admin picks one.
+      async function claimDialog(t) {
+        const issue = async (customerAccountId) => {
+          const r = await api(
+            'POST',
+            `/admin/tables/${t.id}/claim-token`,
+            customerAccountId ? { customerAccountId } : {},
+          );
+          dialog(`Pairing QR for ${t.displayName}`, [
+            el('p', {
+              className: 'muted',
+              textContent: `For ${customerName(r.pairing.accountId)} only. The previous QR code stops working.`,
+            }),
+            ...linkBlock(r.pairing.link),
+          ]);
+          await load();
+        };
+
+        if (t.reservedForAccountId) {
+          if (
+            confirm(
+              `Issue a new pairing QR for ${customerName(t.reservedForAccountId)}? The previous one stops working.`,
+            )
+          ) {
+            await issue(undefined);
+          }
+          return;
+        }
+
+        const pick = customerSelect();
+        dialog(
+          `Pairing QR for ${t.displayName}`,
+          [
+            el('p', {
+              className: 'muted',
+              textContent:
+                'This table was made before codes were tied to a customer. Choose the customer this code is for:',
+            }),
+            el(
+              'form',
+              {
+                className: 'stack',
+                onsubmit: (ev) => {
+                  ev.preventDefault();
+                  run(() => issue(pick.value));
+                },
+              },
+              el('label', {}, 'Customer', pick),
+              el(
+                'div',
+                { className: 'row' },
+                cancelButton(),
+                el('button', { type: 'submit', textContent: 'Issue code' }),
+              ),
+            ),
+          ],
+          [],
+        );
+      }
+
+      $('login-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        base = $('api').value.trim().replace(/\/+$/, '');
+        $('login-error').textContent = '';
+        try {
+          const s = await api('POST', '/auth/login', {
+            email: $('email').value,
+            password: $('password').value,
+          });
+          token = s.accessToken;
+          const me = await api('GET', '/auth/me');
+          if (me.role !== 'admin') {
+            await api('POST', '/auth/logout', {}).catch(() => {});
+            throw new Error('This account is not an admin.');
+          }
+          $('password').value = '';
+          $('who').textContent = me.email;
+          $('login').hidden = true;
+          $('app').hidden = false;
+          await load();
+        } catch (e) {
+          token = '';
+          $('login-error').textContent = e.message;
+        }
+      });
+      $('logout').onclick = async () => {
+        try {
+          await api('POST', '/auth/logout', {});
+        } catch {}
+        token = '';
+        clearInterval(refreshTimer);
+        states = new Map();
+        $('app').hidden = true;
+        $('login').hidden = false;
+      };
+      $('refresh').onclick = () => run(load);
+      $('provision').onclick = provisionDialog;
+      $('filter').addEventListener('input', render);
+
+      $('customer-form').addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        const f = ev.target;
+        run(async () => {
+          const r = await api('POST', '/admin/customers', {
+            email: f.email.value,
+            displayName: f.displayName.value,
+          });
+          f.reset();
+          accessDialog('Customer created', r);
+          await load();
+        });
+      });
+    </script>
+  </body>
+</html>

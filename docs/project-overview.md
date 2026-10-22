@@ -363,7 +363,11 @@ Ce que la page contient (d'après son code) :
   saisie de la géométrie, validée par l'API.
 - Les erreurs de l'API s'affichent dans une zone `role="alert"`.
 
-Endpoints utilisés : `/auth/login`, `/admin/customers*`, `/admin/tables*`.
+Depuis le 22/10/2026 elle montre aussi l'**état en ligne** de chaque table (lecture de `GET /tables/:id`, toutes les
+10 s), des boutons **Copy** (id, lien, identifiants du broker), des états vides, une confirmation avant de désactiver
+une table et des messages d'erreur en clair. Parcours pas à pas : [`docs/admin.md`](admin.md).
+
+Endpoints utilisés : `/auth/login`, `/admin/customers*`, `/admin/tables*`, et `GET /tables/:id` pour l'état en ligne.
 Limites : pas de build ni de tests automatisés dédiés, pas de rôles fins (tout admin peut
 tout faire), pas de journal d'audit.
 
