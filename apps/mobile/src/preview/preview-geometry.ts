@@ -26,8 +26,35 @@ const MAX_STEP = 0.02;
 
 export type XY = readonly [x: number, y: number];
 
-export function polarToXY([theta, rho]: PolarPoint): XY {
-  return [rho * Math.cos(theta), -rho * Math.sin(theta)];
+/**
+ * How far the table reaches along x and y, with the longer side at 1 (see
+ * `tableProportions`). A round or square table is `{ x: 1, y: 1 }`; a design is
+ * stretched to the ellipse inscribed in the table, the same mapping the
+ * controller applies (`polarToTableMm`).
+ */
+export interface PreviewScale {
+  readonly x: number;
+  readonly y: number;
+}
+
+const UNIT_SCALE: PreviewScale = { x: 1, y: 1 };
+
+/** Extra room around the table, in the same units, for its rim and the progress ring. */
+export const PREVIEW_MARGIN = PREVIEW_VIEW - 1;
+
+/** `viewBox` of a preview of a table of this scale, and its width over its height. */
+export function previewViewBox(scale: PreviewScale): { viewBox: string; aspect: number } {
+  const halfWidth = scale.x + PREVIEW_MARGIN;
+  const halfHeight = scale.y + PREVIEW_MARGIN;
+
+  return {
+    viewBox: `${-halfWidth} ${-halfHeight} ${2 * halfWidth} ${2 * halfHeight}`,
+    aspect: halfWidth / halfHeight,
+  };
+}
+
+export function polarToXY([theta, rho]: PolarPoint, scale: PreviewScale = UNIT_SCALE): XY {
+  return [scale.x * rho * Math.cos(theta), -scale.y * rho * Math.sin(theta)];
 }
 
 /**
@@ -36,14 +63,18 @@ export function polarToXY([theta, rho]: PolarPoint): XY {
  * joined by a straight chord: a long arc described by two points must look like
  * an arc, not a line.
  */
-export function sampleCurve(points: readonly PolarPoint[], maxStep = MAX_STEP): XY[] {
+export function sampleCurve(
+  points: readonly PolarPoint[],
+  maxStep = MAX_STEP,
+  scale: PreviewScale = UNIT_SCALE,
+): XY[] {
   const sampled: XY[] = [];
 
   for (const [index, point] of points.entries()) {
     const previous = points[index - 1];
 
     if (previous === undefined) {
-      sampled.push(polarToXY(point));
+      sampled.push(polarToXY(point, scale));
       continue;
     }
 
@@ -52,10 +83,10 @@ export function sampleCurve(points: readonly PolarPoint[], maxStep = MAX_STEP): 
     for (let step = 1; step <= steps; step += 1) {
       const t = step / steps;
       sampled.push(
-        polarToXY([
-          previous[0] + (point[0] - previous[0]) * t,
-          previous[1] + (point[1] - previous[1]) * t,
-        ]),
+        polarToXY(
+          [previous[0] + (point[0] - previous[0]) * t, previous[1] + (point[1] - previous[1]) * t],
+          scale,
+        ),
       );
     }
   }
@@ -89,8 +120,12 @@ export interface PreviewPaths {
  * inside the last segment: the same rule the driver uses for progress, applied
  * to the coarser preview. With no `progress` nothing is drawn.
  */
-export function buildPreviewPaths(path: readonly PolarPoint[], progress?: number): PreviewPaths {
-  const full = toPathData(sampleCurve(path));
+export function buildPreviewPaths(
+  path: readonly PolarPoint[],
+  progress?: number,
+  scale: PreviewScale = UNIT_SCALE,
+): PreviewPaths {
+  const full = toPathData(sampleCurve(path, MAX_STEP, scale));
 
   if (progress === undefined || !(progress > 0) || path.length < 2) {
     return { full, drawn: '' };
@@ -98,5 +133,8 @@ export function buildPreviewPaths(path: readonly PolarPoint[], progress?: number
 
   const { point, passed } = locateAlongPath(path, progress);
 
-  return { full, drawn: toPathData(sampleCurve([...path.slice(0, passed), point])) };
+  return {
+    full,
+    drawn: toPathData(sampleCurve([...path.slice(0, passed), point], MAX_STEP, scale)),
+  };
 }

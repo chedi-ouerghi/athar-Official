@@ -1,12 +1,13 @@
-import type { DesignSummary } from '@athar/contracts';
+import type { DesignSummary, TableGeometry } from '@athar/contracts';
 import type { ReactElement } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useDesign } from '../features/designs/useDesign';
 import { describeDuration } from '../i18n/format-duration';
 import { useI18n } from '../i18n/context';
 import { localize } from '../i18n/locale';
-import { radius, shadows, spacing } from '../theme';
+import { radius, spacing } from '../theme';
 import { AppText } from './AppText';
+import { Card } from './Card';
 import { DesignPreview } from './DesignPreview';
 import { Icon } from './Icon';
 import { useTheme } from './use-theme';
@@ -14,79 +15,96 @@ import { useTheme } from './use-theme';
 export interface DesignCardProps {
   readonly design: DesignSummary;
   readonly onPress: () => void;
+  /** The table the design is for, so the picture has its shape. Round when left out. */
+  readonly geometry?: TableGeometry;
   readonly testID?: string;
 }
 
-/** Side of the preview disc. */
-const THUMBNAIL = 104;
+/** Longer side of the preview. */
+const THUMBNAIL = 100;
 
 /**
  * One design in the list. The list endpoint carries no preview, so the card
  * fetches its own design detail for the picture (open decision 7); until it
  * arrives, or if it fails, an empty sand disc holds its place.
  */
-export function DesignCard({ design, onPress, testID }: DesignCardProps): ReactElement {
+export function DesignCard({ design, onPress, geometry, testID }: DesignCardProps): ReactElement {
   const { locale, isRtl, t } = useI18n();
   const theme = useTheme();
   const detail = useDesign(design.id);
   const duration = describeDuration(design.estimatedDurationSeconds, locale);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={localize(design.title, locale)}
+    <Card
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        shadows.soft,
-        {
-          backgroundColor: pressed ? theme.surfaceMuted : theme.surface,
-          borderColor: theme.border,
-          shadowColor: theme.shadow,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
-        },
-      ]}
+      accessibilityLabel={localize(design.title, locale)}
+      padding="md"
       testID={testID}
     >
-      {/* Reserve the disc's space so the card does not jump when the picture loads. */}
-      <View style={[styles.thumbnail, { backgroundColor: theme.discEdge }]}>
-        {detail.state.status === 'ready' ? (
-          <DesignPreview
-            path={detail.state.data.previewPath}
-            size={THUMBNAIL}
-            testID={testID ? `${testID}-preview` : undefined}
-          />
-        ) : null}
-      </View>
+      <View style={styles.row}>
+        {/* Reserve the picture's space so the card does not jump when it loads; the picture then draws its own table. */}
+        <View
+          style={[
+            styles.thumbnail,
+            detail.state.status === 'ready'
+              ? null
+              : { backgroundColor: theme.discEdge, borderRadius: THUMBNAIL / 2 },
+          ]}
+        >
+          {detail.state.status === 'ready' ? (
+            <DesignPreview
+              path={detail.state.data.previewPath}
+              size={THUMBNAIL}
+              geometry={geometry}
+              testID={testID ? `${testID}-preview` : undefined}
+            />
+          ) : null}
+        </View>
 
-      <View style={styles.text}>
-        <AppText variant="heading">{localize(design.title, locale)}</AppText>
-        <AppText variant="caption" tone="textMuted" numberOfLines={2}>
-          {localize(design.description, locale)}
-        </AppText>
-        <View style={styles.meta}>
-          <Icon name="clock" color={theme.gold} size={14} />
-          <AppText variant="caption" tone="accentText">
-            {t(duration.key, duration.params)}
+        <View style={styles.text}>
+          <AppText variant="heading">{localize(design.title, locale)}</AppText>
+          <AppText variant="caption" tone="textMuted" numberOfLines={2}>
+            {localize(design.description, locale)}
           </AppText>
+          <View style={[styles.duration, { backgroundColor: theme.accentSoft }]}>
+            <Icon name="clock" color={theme.accentText} size={14} />
+            <AppText variant="caption" tone="accentText">
+              {t(duration.key, duration.params)}
+            </AppText>
+          </View>
+        </View>
+
+        <View style={[styles.chevron, { backgroundColor: theme.surfaceMuted }]}>
+          <Icon name="chevron" color={theme.accentText} size={18} mirror={isRtl} />
         </View>
       </View>
-
-      <Icon name="chevron" color={theme.textMuted} size={20} mirror={isRtl} />
-    </Pressable>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    borderRadius: radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: spacing.md,
+  row: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
+  thumbnail: {
+    width: THUMBNAIL,
+    height: THUMBNAIL,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  thumbnail: { width: THUMBNAIL, height: THUMBNAIL, borderRadius: THUMBNAIL / 2 },
-  text: { flex: 1, gap: spacing.xs },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
+  text: { flex: 1, gap: spacing.xs, alignItems: 'flex-start' },
+  duration: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 2,
+    marginTop: 2,
+  },
+  chevron: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

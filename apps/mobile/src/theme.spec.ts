@@ -37,6 +37,12 @@ describe.each([
       [theme.textMuted, theme.surface],
       [theme.textOnAccent, theme.accent],
       [theme.textOnAccent, theme.accentPressed],
+      // The whole gold gradient of a button, end to end.
+      [theme.textOnAccent, theme.gradientStart],
+      [theme.textOnAccent, theme.gradientMid],
+      [theme.textOnAccent, theme.gradientEnd],
+      [theme.textMuted, theme.surfaceElevated],
+      [theme.accentText, theme.surface],
       [theme.accentText, theme.accentSoft],
       [theme.success, theme.successSoft],
       [theme.danger, theme.dangerSoft],

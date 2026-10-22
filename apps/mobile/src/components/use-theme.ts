@@ -1,7 +1,16 @@
 import { useColorScheme } from 'react-native';
 import { darkTheme, lightTheme, type Theme } from '../theme';
+import { useThemePreference } from './theme-preference';
 
-/** The colours for the device's light or dark setting. */
+/** Whether the app is showing its dark look: the user's choice, else the phone's setting. */
+export function useIsDark(): boolean {
+  const system = useColorScheme();
+  const { preference } = useThemePreference();
+
+  return preference === 'system' ? system === 'dark' : preference === 'dark';
+}
+
+/** The colours for the look in use. */
 export function useTheme(): Theme {
-  return useColorScheme() === 'dark' ? darkTheme : lightTheme;
+  return useIsDark() ? darkTheme : lightTheme;
 }

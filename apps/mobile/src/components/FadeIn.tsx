@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { Animated, Easing, type StyleProp, type ViewStyle } from 'react-native';
+import { motion } from '../theme';
 import { useReduceMotion } from './use-reduce-motion';
 
 export interface FadeInProps {
@@ -9,12 +10,15 @@ export interface FadeInProps {
   readonly style?: StyleProp<ViewStyle>;
 }
 
-const DURATION_MS = 520;
-const RISE_PX = 14;
+/** The delay of the nth item of a list entering one after another. */
+export function staggerDelay(index: number, base = 0): number {
+  return base + index * motion.stagger;
+}
 
 /**
- * Content that eases in: a short fade and rise, once, when it first appears. The
- * movement is vertical only, so it reads the same in both reading directions.
+ * Content that eases in: a fade, a rise and a slight settle from 96% size, once,
+ * when it first appears. The movement is vertical only, so it reads the same in
+ * both reading directions, and it is skipped when the user asked for less motion.
  */
 export function FadeIn({ children, delay = 0, style }: FadeInProps): ReactElement {
   const reduceMotion = useReduceMotion();
@@ -28,7 +32,7 @@ export function FadeIn({ children, delay = 0, style }: FadeInProps): ReactElemen
 
     const animation = Animated.timing(progress, {
       toValue: 1,
-      duration: DURATION_MS,
+      duration: motion.slow,
       delay,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
@@ -47,7 +51,13 @@ export function FadeIn({ children, delay = 0, style }: FadeInProps): ReactElemen
         {
           opacity: progress,
           transform: [
-            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [RISE_PX, 0] }) },
+            {
+              translateY: progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [motion.rise, 0],
+              }),
+            },
+            { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
           ],
         },
       ]}
