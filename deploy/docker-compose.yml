@@ -1,0 +1,62 @@
+# Athar — stack de test sur UNE VM GCP e2-micro (1 Go RAM)
+# Emplacement sur la VM : /opt/athar/docker-compose.yml
+#
+#   Internet ──443──► Caddy ──► api:3000            (https://api.DOMAIN)
+#                          └──► mosquitto:9001      (wss://mqtt.DOMAIN)
+#
+# MQTT passe en WebSocket TLS sur le port 443 :
+#  - un seul certificat, géré automatiquement par Caddy (Let's Encrypt, gratuit)
+#  - le port 443 passe partout (réseaux d'entreprise/hôtel à Dubai), contrairement à 8883
+#  - déjà autorisé par environment.schema.ts (wss://)
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 96m
+
+  api:
+    image: ghcr.io/chedi-ouerghi/athar-api:latest
+    restart: unless-stopped
+    env_file: .env # jamais commité : créé à la main sur la VM
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=384
+      TRUST_PROXY: '1' # un seul proxy devant l'API (Caddy) : le login voit la vraie IP client
+      # Sans ces chemins, les fichiers JSON iraient dans /repo/apps/api/data (hors volume)
+      # et seraient perdus à chaque redéploiement.
+      TABLES_DATA_FILE: /data/tables.json
+      ACCOUNTS_DATA_FILE: /data/accounts.json
+      SESSIONS_DATA_FILE: /data/sessions.json
+      TABLE_ACCESS_DATA_FILE: /data/table-access.json
+    volumes:
+      - api-data:/data
+    depends_on:
+      - mosquitto
+    mem_limit: 512m
+    stop_grace_period: 20s # SHUTDOWN_TIMEOUT_MS (10 s) doit finir avant le SIGKILL de Docker
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - mosquitto-data:/mosquitto/data
+    mem_limit: 64m
+
+volumes:
+  caddy-data:
+  caddy-config:
+  api-data:
+  mosquitto-data:

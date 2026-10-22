@@ -27,14 +27,14 @@ wire-level schemas only, so neither side depends on the other's internals.
 
 ### `apps/api` (NestJS)
 
-| Directory       | Responsibility                                                     |
-| --------------- | ------------------------------------------------------------------ |
-| `src/config`    | Environment schema, validation, typed `AppConfig`, injection token |
-| `src/logging`   | `pino`/`nestjs-pino` setup, redaction, transport selection         |
-| `src/lifecycle` | Signal handling and the bounded-grace-period shutdown watchdog     |
-| `src/health`    | Liveness and readiness probes                                      |
-| `src/common`    | Request validation, exception filter, shared helpers               |
-| `src/bootstrap` | Application composition; shared by `main.ts` and the tests         |
+| Directory          | Responsibility                                                     |
+| ------------------ | ------------------------------------------------------------------ |
+| `src/config`       | Environment schema, validation, typed `AppConfig`, injection token |
+| `src/logging`      | `pino`/`nestjs-pino` setup, redaction, transport selection         |
+| `src/lifecycle`    | Signal handling and the bounded-grace-period shutdown watchdog     |
+| `src/health`       | Liveness and readiness probes                                      |
+| `src/common`       | Request validation, exception filter, shared helpers               |
+| `src/bootstrap.ts` | Application composition; shared by `main.ts` and the tests         |
 
 Rules that hold across the service:
 
@@ -212,11 +212,11 @@ flowchart LR
     Jobs --> Driver{{"TableDriver (interface)"}}
     Tables --> Driver
     Sim["SimulatedTableDriver"] -. implements .-> Driver
-    Hw["HardwareTableDriver (future, not built)"] -. "will implement" .-> Driver
+    Hw["MqttTableDriver"] -. implements .-> Driver
   end
 
-  Hw -. "network (future)" .-> Gw["gateway process (future)"]
-  Gw -. "network (future)" .-> Ctl["controller on the table (future)"]
+  Hw -- "MQTT, QoS 1" --> Broker["MQTT broker (Mosquitto)"]
+  Broker -- "MQTT, tables connect out" --- Ctl["controller on the table (Raspberry Pi)"]
 
   Contracts["packages/contracts"] -.-> Mobile
   Contracts -.-> Api
@@ -230,15 +230,15 @@ from the app to a table is app → API → driver.
 
 ### Responsibilities
 
-| Component            | Owns                                                                                                                           | Must not                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `apps/mobile`        | Screens, link/QR handling, polling, presentation of mode and state                                                             | Contain simulator logic, know trajectories, or build URLs        |
-| `apps/api`           | Domain rules, the job state machine, validation, the driver boundary                                                           | Import mobile code; let a controller call a concrete driver      |
-| `packages/contracts` | Wire schemas: table, design, job, error codes, table id                                                                        | Import NestJS/React Native; carry trajectories or driver details |
-| `tables` (API)       | Table registry (persisted), `enabled` flag, derived connection status, the admin provisioning endpoints behind `ADMIN_API_KEY` | Own job state                                                    |
-| `designs` (API)      | The four static designs and their trajectories (versioned data in the repo)                                                    | Be writable at runtime                                           |
-| `drawing-jobs` (API) | `DrawingJob` records, the state machine, one-active-job rule, idempotency                                                      | Know how a table moves sand                                      |
-| `device` (API)       | `TableDriver`, `SimulatedTableDriver`, driver selection from `TABLE_MODE`                                                      | Be bypassed: everything else uses the `TableDriver` token        |
+| Component            | Owns                                                                                                                            | Must not                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `apps/mobile`        | Screens, link/QR handling, polling, presentation of mode and state                                                              | Contain simulator logic, know trajectories, or build URLs        |
+| `apps/api`           | Domain rules, the job state machine, validation, the driver boundary                                                            | Import mobile code; let a controller call a concrete driver      |
+| `packages/contracts` | Wire schemas: table, design, job, error codes, table id                                                                         | Import NestJS/React Native; carry trajectories or driver details |
+| `tables` (API)       | Table registry (persisted), `enabled` flag, derived connection status, the admin provisioning endpoints behind an admin session | Own job state                                                    |
+| `designs` (API)      | The four static designs and their trajectories (versioned data in the repo)                                                     | Be writable at runtime                                           |
+| `drawing-jobs` (API) | `DrawingJob` records, the state machine, one-active-job rule, idempotency                                                       | Know how a table moves sand                                      |
+| `device` (API)       | `TableDriver`, `SimulatedTableDriver`, driver selection from `TABLE_MODE`                                                       | Be bypassed: everything else uses the `TableDriver` token        |
 
 Dependency rules (code review, and lint `no-restricted-imports` where
 practical):
@@ -260,28 +260,22 @@ TABLE_MODE: z.enum(['simulation', 'hardware']).default('simulation'),
 
 - `simulation` (default): `SimulatedTableDriver` is bound to the `TableDriver`
   token.
-- `hardware`: **the process refuses to start** with a dedicated, readable error
-  until a hardware driver exists:
+- `hardware`: `MqttTableDriver` is bound. It reaches the real tables through an
+  MQTT broker (Mosquitto), configured by `MQTT_URL`, `MQTT_USERNAME` and
+  `MQTT_PASSWORD`; see [`MqttTableDriver`](#mqtttabledriver). The API **starts
+  even if the broker is down**: the client keeps retrying, and every table reads
+  as `offline` until the broker and the table's own presence have been heard. In
+  production the configuration must use `mqtts://` (or `wss://`) with a login.
 
-  ```
-  TABLE_MODE=hardware is not available: no hardware table driver is installed in this build.
-  Set TABLE_MODE=simulation.
-  ```
-
-  The check lives in the driver factory (`createTableDriver(config)`), which runs
-  while the module graph is created, before the server binds a port. It throws a
-  `StartupConfigurationError`; `main.ts` prints its message verbatim, the way it
-  already prints `EnvironmentValidationError`, instead of the generic "Failed to
-  start the API." with a stack trace.
-
+- The choice is made in the driver factory (`createTableDriver(config)`), which
+  runs while the module graph is created, before the server binds a port.
 - The resolved mode is part of `AppConfig`; nothing else decides the mode, and
   no client can influence it.
 
-`HardwareTableDriver` is **described, not created**, in this milestone. It will
-implement the same `TableDriver` interface, own the transport to the real
-controller, and be selected by the same factory. Its arrival must require no
-change to `tables`, `designs`, `drawing-jobs`, the controllers, the contracts or
-the mobile app. If it does, the interface was wrong: fix the interface first.
+`MqttTableDriver` implements the same `TableDriver` interface and is selected by
+the same factory. Its arrival required no change to `tables`, `designs`,
+`drawing-jobs`, the controllers or the mobile app. If a driver ever does, the
+interface was wrong: fix the interface first.
 
 ## 2. `TableDriver` interface
 
@@ -309,9 +303,9 @@ phone  ──HTTPS over the internet──▶  backend  ──▶  table control
 - The **driver forwards the command to the table's controller**. In this
   milestone there is no controller: `SimulatedTableDriver` sits in its place and
   answers exactly as a controller would through the interface, so everything
-  above the driver is the production code path. A future `HardwareTableDriver`
-  replaces the simulator and forwards to the real controller over the network
-  (below); nothing above the driver changes.
+  above the driver is the production code path. With `TABLE_MODE=hardware`,
+  `MqttTableDriver` replaces the simulator and forwards to the real controller
+  through the broker (below); nothing above the driver changes.
 - Status flows back the same way: controller (or simulator) → driver →
   `drawing-jobs` → the job the phone polls.
 
@@ -454,7 +448,7 @@ Rules for every implementation:
   app treats `404` for a known job id as a normal state
   ([section 7](#7-mobile-app-structure)).
 
-### `HardwareTableDriver` (future; description only)
+### `MqttTableDriver`
 
 Decided: **the table connects to the backend over the network, and the phone
 never talks to the table directly.** The reasons are that tables sit in public
@@ -462,17 +456,47 @@ venues and play unattended, and that routing everything through the backend
 keeps access control and job rules in one place
 ([future-infrastructure-decisions.md](future-infrastructure-decisions.md)).
 
-`HardwareTableDriver` therefore lives on the **backend side**, behind this
-interface. It will talk to a controller on the table over the network, most
-likely through a separate gateway process that holds the long-lived
-connections, so they stay away from request handling. In terms of the diagram in
-[section 1](#1-components-and-boundaries): the driver is a client of the
-gateway, and the gateway is the peer of the table's controller.
+`MqttTableDriver` (`apps/api/src/device/hardware/`) lives on the **backend
+side**, behind this interface. The Raspberry Pi on each table connects out to an
+MQTT broker (Mosquitto), so nothing is exposed on the venue's network; the
+broker is the long-lived connection holder, and the API is one more client of
+it. The protocol is its own contract, `device-protocol.ts` in `@athar/contracts`
+(versioned by a `v` field), separate from the HTTP API. Topics, all under
+`athar/v1/t/{tableId}/`:
 
-What is still open ([Open decisions](#9-open-decisions)): the controller
-hardware and the transport between gateway and controller; the interface above
-deliberately names neither. Device framing remains a separate contract from the
-HTTP API. Until the driver exists, `TABLE_MODE=hardware` cannot start.
+| Topic      | Direction    | Content                                                          |
+| ---------- | ------------ | ---------------------------------------------------------------- |
+| `cmd`      | API -> table | `start`, `pause`, `resume`, `stop`, `light`; QoS 1, not retained |
+| `ack`      | table -> API | Accepted or refused, by `cmdId`; QoS 1                           |
+| `status`   | table -> API | A `DriverStatus` snapshot, retained                              |
+| `presence` | table -> API | Plain text `online` / `offline`, retained; `offline` is the LWT  |
+
+How it behaves:
+
+- **A command resolves on its `ack`, not on completion.** Each command carries a
+  `cmdId`; the promise settles when an `ack` with that id arrives from the same
+  table. A drawing takes minutes and is followed through `status`, so no HTTP
+  request stays open for it.
+- **Five seconds without an `ack` is `OFFLINE`** (`DEVICE_ACK_TIMEOUT_MS`). So is
+  a command pending when the table's presence turns `offline` or the broker
+  connection drops, without waiting for the timeout.
+- **No command is queued for later.** A command is refused with `OFFLINE`
+  unless the table is known to be online right now, and the broker connection is
+  up. Otherwise the MQTT client would hold a QoS 1 message and send it on
+  reconnection, possibly long after the visitor gave up, and a table would start
+  a drawing nobody is waiting for. Commands are never retained either.
+- **Presence comes from the broker.** A table whose presence has not been heard
+  is treated as offline. When the broker connection is lost, every table is.
+- **The table keeps drawing when the network drops.** Losing presence reports the
+  connection as `offline` but keeps the last phase and progress; the driver does
+  not fail the job. A message from a table is accepted only on that table's own
+  topic and naming that table; unreadable or oversized messages are ignored.
+- The table's own broker login (an ACL limiting it to its own topics) is what
+  keeps one table from speaking for another; the API's login can read all tables.
+
+Still open: a `start` that timed out may nevertheless have been accepted by a
+slow table, so the API's job and the table can disagree until reconciled (a
+persistence-phase concern, with the jobs that survive a restart).
 
 ## 3. Domain model
 
@@ -646,7 +670,8 @@ so far. It gets this from `previewPath`, not from the trajectory:
 | ------------ | ----------------------------------------------------------------- | --------------------------------------------- |
 | `id`         | string (UUID)                                                     | Server-generated                              |
 | `tableId`    | string                                                            |                                               |
-| `designId`   | string                                                            |                                               |
+| `kind`       | `'design' \| 'path' \| 'rake'`                                    | What it draws (Phase 5)                       |
+| `designId`   | string \| null                                                    | The catalogue design; `null` for path or rake |
 | `mode`       | `'simulation' \| 'hardware'`                                      | Copied from the driver at creation; immutable |
 | `state`      | `queued \| drawing \| paused \| completed \| failed \| cancelled` | See section 4                                 |
 | `progress`   | number, 0..1                                                      | Never decreases; `1` if and only if completed |
@@ -729,11 +754,13 @@ when the table is lost, so a job cannot hold a table forever.
 (UUID v4, created when the user opens the design screen and reused on retry).
 The API keeps `(tableId, clientRequestId) -> jobId` for the retained history.
 
-- Same pair and same `designId`: **no new job.** The original job is returned
+- Same pair and the same request (same kind and design, or the same path point
+  for point, compared by a SHA-256 of the parsed path, stored with the job):
+  **no new job.** The original job is returned
   with `200` instead of `201`. This is checked **before** the busy check, so a
   double tap that arrives after the first job started returns that job, not
   `TABLE_BUSY`.
-- Same `clientRequestId` with a different `designId`: `IDEMPOTENCY_CONFLICT`
+- Same `clientRequestId` with a different request: `IDEMPOTENCY_CONFLICT`
   (409).
 - A new `clientRequestId` while the table is busy: `TABLE_BUSY`.
 
@@ -816,25 +843,31 @@ envelope. Every failure uses the existing error envelope.
 allows within `v1`. The filter must change to honour a `code` carried by domain
 exceptions rather than deriving it from the status alone (gap 3.6).
 
-| Code                   | HTTP | Meaning                                          |
-| ---------------------- | ---- | ------------------------------------------------ |
-| `VALIDATION_FAILED`    | 400  | Existing. Bad body, query or path parameter      |
-| `TABLE_NOT_FOUND`      | 404  | Unknown table id                                 |
-| `DESIGN_NOT_FOUND`     | 404  | Unknown design id                                |
-| `JOB_NOT_FOUND`        | 404  | Unknown job id, including after an API restart   |
-| `TABLE_DISABLED`       | 409  | The table exists but `enabled` is false          |
-| `TABLE_OFFLINE`        | 409  | The driver reports the table offline or in error |
-| `TABLE_BUSY`           | 409  | The table already has an active job              |
-| `INVALID_TRANSITION`   | 409  | Command not allowed in the job's current state   |
-| `IDEMPOTENCY_CONFLICT` | 409  | `clientRequestId` reused with a different design |
-| `UNAUTHORIZED`         | 401  | Admin endpoints only: missing or wrong admin key |
+| Code                    | HTTP | Meaning                                                                               |
+| ----------------------- | ---- | ------------------------------------------------------------------------------------- |
+| `VALIDATION_FAILED`     | 400  | Existing. Bad body, query or path parameter                                           |
+| `TABLE_NOT_FOUND`       | 404  | Unknown table id                                                                      |
+| `DESIGN_NOT_FOUND`      | 404  | Unknown design id                                                                     |
+| `JOB_NOT_FOUND`         | 404  | Unknown job id, including after an API restart                                        |
+| `TABLE_DISABLED`        | 409  | The table exists but `enabled` is false                                               |
+| `TABLE_OFFLINE`         | 409  | The driver reports the table offline or in error                                      |
+| `TABLE_BUSY`            | 409  | The table already has an active job                                                   |
+| `INVALID_TRANSITION`    | 409  | Command not allowed in the job's current state                                        |
+| `IDEMPOTENCY_CONFLICT`  | 409  | `clientRequestId` reused with a different design                                      |
+| `UNAUTHORIZED`          | 401  | No session, or an unknown access token                                                |
+| `PAIRING_TOKEN_INVALID` | 400  | A claim or share code that is unknown, expired, used up, revoked or for another table |
+| `TABLE_ALREADY_CLAIMED` | 409  | A claim code for a table that already has an owner                                    |
+| `DESIGN_READ_ONLY`      | 403  | Deleting a catalogue design (reserved; custom designs are not built yet)              |
 
-`UNAUTHORIZED` is only returned under `/api/v1/admin`
-([Table provisioning](#table-provisioning-admin)); the public endpoints in this
-section never return it, because they have no authentication in this milestone.
+Since Phase 3 every endpoint in this section needs a session, so each can also
+answer `UNAUTHORIZED` or `SESSION_EXPIRED`; see
+[Orders, entitlements and ownership](#orders-entitlements-and-ownership). The
+session codes are listed in [api-conventions.md](api-conventions.md#sessions).
 The existing codes keep their meaning. Check order for
-`POST /tables/:tableId/jobs`: validation, table exists, design exists,
-idempotency replay, table enabled, table online, table not busy.
+`POST /tables/:tableId/jobs`: session, validation, table exists **and is the
+caller's**, design exists, idempotency replay, then the drawing conditions of
+[Pairing and the drawing conditions](#pairing-and-the-drawing-conditions):
+enabled, paired, online, free, feature in plan.
 
 ### Resource shapes
 
@@ -847,6 +880,11 @@ type Table = {
   mode: 'simulation' | 'hardware';
   connection: 'online' | 'offline' | 'busy' | 'error';
   activeJobId: string | null;
+  plan: 'basic' | 'personalized';
+  voiceAssistant: boolean;
+  features: Feature[];
+  ambienceId: string | null; // from the driver; null until one is set
+  readiness: { paired: boolean; online: boolean; free: boolean; canStart: boolean };
 };
 
 type LocalizedText = { en: string; ar: string };
@@ -868,7 +906,8 @@ type DesignDetail = DesignSummary & {
 type DrawingJob = {
   id: string;
   tableId: string;
-  designId: string;
+  kind: 'design' | 'path' | 'rake';
+  designId: string | null; // null for a path or the rake
   mode: 'simulation' | 'hardware';
   state: 'queued' | 'drawing' | 'paused' | 'completed' | 'failed' | 'cancelled';
   progress: number;
@@ -882,7 +921,10 @@ type DrawingJob = {
 
 ### Endpoints
 
-All paths below are relative to the service root.
+All paths below are relative to the service root. All need a session except
+`/health` and `/ready`; a table (and its jobs) that is not the caller's answers
+as if it did not exist
+([Orders, entitlements and ownership](#orders-entitlements-and-ownership)).
 
 **`GET /api/v1/tables/:tableId`**
 
@@ -911,7 +953,13 @@ All paths below are relative to the service root.
 - Response: `201` `DrawingJob` for a new job; `200` `DrawingJob` for an
   idempotent replay.
 - Errors: `VALIDATION_FAILED`, `TABLE_NOT_FOUND`, `DESIGN_NOT_FOUND`,
-  `TABLE_DISABLED`, `TABLE_OFFLINE`, `TABLE_BUSY`, `IDEMPOTENCY_CONFLICT`.
+  `IDEMPOTENCY_CONFLICT`, `TABLE_DISABLED`, `PAIRING_REQUIRED`, `TABLE_OFFLINE`,
+  `TABLE_BUSY`, `FEATURE_NOT_IN_PLAN`.
+
+**`POST /api/v1/tables/:tableId/pairing`**, **`DELETE` the same**
+
+- Owner only. `200` `{ tableId, expiresAt }` (create or extend); `204` to unpair.
+- Errors: `VALIDATION_FAILED`, `TABLE_NOT_FOUND`.
 
 **`GET /api/v1/jobs/:jobId`**
 
@@ -923,7 +971,7 @@ All paths below are relative to the service root.
 
 - Request: path `jobId`; empty body.
 - Response: `200` the updated `DrawingJob`, so the app needs no second round trip.
-- Errors: `VALIDATION_FAILED`, `JOB_NOT_FOUND`, `INVALID_TRANSITION`.
+- Errors: `VALIDATION_FAILED`, `JOB_NOT_FOUND`, `PAIRING_REQUIRED`, `INVALID_TRANSITION`.
 
 **`GET /api/v1/tables/:tableId/jobs`**
 
@@ -1012,28 +1060,40 @@ screen both call it, so they cannot disagree.
 
 ### What the QR code is, and is not
 
+**Decision (Phase 3, D1): the QR code identifies; the account authorises.**
+
 - It contains **only** a public table id inside a link: no token, signature,
   user data, job id or API address.
 - It is **never proof of authorisation.** Holding the id means "I know which
-  table this is", nothing more. Anyone who can read or photograph the printed
-  code, or guess an id, can open that table's screen.
+  table this is", nothing more. Since Phase 3 the API shows a table only to a
+  session of its owner (or an admin); anyone else, including someone who
+  photographed the code, gets `TABLE_NOT_FOUND`.
 - The app treats the id as untrusted input: it is validated locally, and the API
   answers `TABLE_NOT_FOUND` for anything unknown.
 
 ### What stops a stranger controlling a table remotely in this milestone
 
+> **Superseded in part by Phase 3.** Tables, designs and jobs now need a session,
+> and only a table's owner can see or command it
+> ([Orders, entitlements and ownership](#orders-entitlements-and-ownership)).
+> Since Phase 4 a session must also be paired with the table
+> ([Pairing and the drawing conditions](#pairing-and-the-drawing-conditions)).
+> In simulation that proves only that the owner opened the table recently, not
+> that they stand at it: proof of presence comes with the hardware. The text
+> below describes the milestone before accounts.
+
 Honestly: **no access control exists on the public endpoints in this
 milestone**, and none is claimed. (The admin endpoints, which create and edit
-tables, are different: they require `ADMIN_API_KEY`; see
-[Table provisioning](#table-provisioning-admin). That key protects who can
+tables, are different: they require an admin session; see
+[Table provisioning](#table-provisioning-admin). That protects who can
 _register_ tables, not who can _use_ one.) What limits the damage:
 
-1. **Every table is simulated.** `TABLE_MODE=hardware` cannot start, so no
-   request can move a physical table. The worst case is a stranger starting,
-   pausing or stopping a _simulated_ job, including **another visitor's** (job
-   commands carry no ownership): a nuisance, not a safety issue. This must be
-   solved together with access control (open decision 2), and before any
-   hardware driver, where it would interrupt a real drawing.
+1. **In simulation mode no request can move a physical table.** The worst case
+   is a stranger starting, pausing or stopping a _simulated_ job, including
+   **another visitor's** (job commands carry no ownership): a nuisance, not a
+   safety issue. With `TABLE_MODE=hardware` (`MqttTableDriver`) a request can
+   move a real table, so access control (open decision 2) must be in place
+   before that mode is used.
 2. The one-active-job rule and the strict state machine bound what anyone can
    do to a table.
 3. The `mode` field and the Simulation badge mean a simulated job is never shown
@@ -1308,19 +1368,23 @@ and `createAppConfig`, listed in `apps/api/.env.example` and in
 [environment-configuration.md](environment-configuration.md). Nothing reads
 `process.env` outside `src/config`.
 
-| Variable                         | Type          | Default              | Example                           | Purpose                                                                                                                                                     |
-| -------------------------------- | ------------- | -------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TABLE_MODE`                     | enum          | `simulation`         | `simulation`                      | `simulation` or `hardware`; `hardware` fails startup for now                                                                                                |
-| `TABLES_DATA_FILE`               | path          | `./data/tables.json` | `/var/lib/athar/tables.json`      | JSON file holding registered tables; created if missing. Must be on persistent storage                                                                      |
-| `ADMIN_API_KEY`                  | secret string | _(unset)_            | `x7Gq…` (>= 32 random characters) | Key for `/api/v1/admin/**`. **Required when `NODE_ENV=production`**; never logged                                                                           |
-| `PUBLIC_LINK_BASE_URL`           | URL           | _(unset)_            | `https://app.athar.example`       | Origin used to build the QR link `<base>/t/<tableId>`. Required in production, must be `https` there. Unset in development: links use `athar://t/<tableId>` |
-| `SIMULATION_SPEED_FACTOR`        | number > 0    | `1`                  | `10`                              | Divides simulated durations; large values for tests and demos                                                                                               |
-| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0  | `0`                  | `3`                               | Every Nth job faults; `0` disables injected faults                                                                                                          |
-| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1   | `0.6`                | `0.5`                             | Progress at which an injected fault occurs                                                                                                                  |
-| `JOB_HISTORY_LIMIT`              | integer >= 1  | `20`                 | `20`                              | Jobs retained per table                                                                                                                                     |
+| Variable                         | Type         | Default                    | Example                            | Purpose                                                                                                                                                     |
+| -------------------------------- | ------------ | -------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TABLE_MODE`                     | enum         | `simulation`               | `simulation`                       | `simulation` or `hardware` (MQTT driver; see `MQTT_URL`)                                                                                                    |
+| `TABLES_DATA_FILE`               | path         | `./data/tables.json`       | `/var/lib/athar/tables.json`       | JSON file holding registered tables; created if missing. Must be on persistent storage                                                                      |
+| `ACCOUNTS_DATA_FILE`             | path         | `./data/accounts.json`     | `/var/lib/athar/accounts.json`     | JSON file holding accounts (password hashes only). Persistent storage                                                                                       |
+| `TABLE_ACCESS_DATA_FILE`         | path         | `./data/table-access.json` | `/var/lib/athar/table-access.json` | JSON file holding claim and share token hashes and guests. Persistent storage                                                                               |
+| `SESSIONS_DATA_FILE`             | path         | `./data/sessions.json`     | `/var/lib/athar/sessions.json`     | JSON file holding sessions (token hashes only). Persistent storage                                                                                          |
+| `PUBLIC_LINK_BASE_URL`           | URL          | _(unset)_                  | `https://app.athar.example`        | Origin used to build the QR link `<base>/t/<tableId>`. Required in production, must be `https` there. Unset in development: links use `athar://t/<tableId>` |
+| `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`                        | `10`                               | Divides simulated durations; large values for tests and demos                                                                                               |
+| `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`                        | `3`                                | Every Nth job faults; `0` disables injected faults                                                                                                          |
+| `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`                      | `0.5`                              | Progress at which an injected fault occurs                                                                                                                  |
+| `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`                       | `20`                               | Jobs retained per table                                                                                                                                     |
 
-The `SIMULATION_*` variables have no effect when `TABLE_MODE=hardware`, which
-cannot start in this milestone anyway.
+The `SIMULATION_*` variables have no effect when `TABLE_MODE=hardware`.
+`MQTT_URL` (default `mqtt://localhost:1883`), `MQTT_USERNAME` and `MQTT_PASSWORD`
+are read only in that mode; in production it requires `mqtts://` or `wss://` and
+both credentials.
 
 Mobile variables are all `EXPO_PUBLIC_*`, therefore public, and depend on the
 inlining fix in gap 3.2. Add them to `apps/mobile/.env.example` and to
@@ -1363,7 +1427,7 @@ sequenceDiagram
   participant Store as tables.json
   participant Cli as table:qr CLI
   participant B as Buyer (mobile app)
-  A->>Api: POST /api/v1/admin/tables (Authorization: Bearer ADMIN_API_KEY)
+  A->>Api: POST /api/v1/admin/tables (Authorization: Bearer admin access token)
   Api->>Api: generate random table id
   Api->>Store: write atomically
   Api-->>A: table + id
@@ -1428,49 +1492,131 @@ Rules:
   the custom-scheme form `athar://t/<tableId>`. Returning the link from the API,
   rather than only from the CLI, lets a future admin UI render the QR itself.
 - The public endpoints are **unchanged** (section 5). Nothing under
-  `/api/v1/admin` is reachable without the key, and no public endpoint exposes
+  `/api/v1/admin` is reachable without an admin session, and no public endpoint exposes
   the admin view.
 
 ### Admin authentication
 
-Admin endpoints are protected by a **server-side secret, `ADMIN_API_KEY`**,
-sent as `Authorization: Bearer <key>`.
+Admin endpoints need a **session of an account with the `admin` role**
+(decisions D5 and D8 in [plans/athar-v1-plan.md](plans/athar-v1-plan.md)), sent
+as `Authorization: Bearer <accessToken>`. Admins are created with
+`pnpm --filter @athar/api admin:create`; there is no shared key.
 
-- Checked by a Nest guard applied to the whole admin controller, so a new admin
-  route is protected by default and an unprotected one has to be deliberate.
-- **Constant-time comparison.** The guard hashes both the supplied and the
-  configured key with SHA-256 and compares the digests with
-  `crypto.timingSafeEqual`. Hashing first gives equal-length buffers, so neither
-  the comparison time nor an early length check leaks how much of the key
-  matched.
-- **A missing header, a malformed header, a wrong key and an unset server key
-  all return the same response**: `401`, error code `UNAUTHORIZED`, a generic
-  message ("Authentication is required."), and `WWW-Authenticate: Bearer`. The
-  response never says which of these happened. The new `UNAUTHORIZED` code is
-  added to `@athar/contracts` (additive within `v1`), and the error filter must
-  map it (gap 3.6 already requires domain codes to pass through).
-- **Required in production.** `ADMIN_API_KEY` is validated in
-  `environment.schema.ts`: when `NODE_ENV=production`, startup fails if it is
-  missing, shorter than 32 characters, or equal to the placeholder in
-  `.env.example`. In development and test it is optional; when it is unset the
-  admin endpoints **fail closed** (every request is `UNAUTHORIZED`).
-- **Never logged.** `req.headers.authorization` is already in the pino redaction
-  list (`create-logger.module.ts`), which covers request logs. This milestone
-  also adds `adminApiKey` and `*.adminApiKey` to that list so the key stays
-  hidden if a config object is ever logged, and `AppConfig` must never be
-  logged whole. The key is only accepted in the header: never in a URL or body,
-  so it cannot land in access logs or the exception filter's
-  `METHOD url` line.
-- **Never in the mobile app.** It is not an `EXPO_PUBLIC_*` variable and no
-  mobile code, contract or build config refers to it. The mobile client never
-  calls `/api/v1/admin`.
-- The key is a **shared secret with no identity**: any holder is every
-  administrator, there is no audit trail of who did what, and rotation means
-  redeploying. That is acceptable for a first milestone and is why real admin
-  accounts are an open decision (18).
-- Brute force: a 32+ character random key is not guessable online, and there is
-  no rate limiting yet (a known gap). Whether the admin routes should also be
-  limited by network, host or rate is open decision 21.
+- `SessionGuard` + `@Roles('admin')` sit on the whole admin controller, so a new
+  admin route is protected by default. The guard runs before validation.
+- Tokens are opaque (256 random bits); only their SHA-256 is stored, in
+  `SESSIONS_DATA_FILE`. Passwords are scrypt hashes in `ACCOUNTS_DATA_FILE`.
+  Stored hashes are compared with `timingSafeEqual`.
+- An access token lives 15 minutes; a refresh token works once, and reusing one
+  revokes the session. An admin session ends 12 hours after sign-in, a customer
+  session after 30 days, however often it is refreshed.
+- Sign-in and activation are limited (in memory, per process): 5 failures per email
+  and IP in 15 minutes, 20 per email in an hour, 30 attempts per IP in 15 minutes.
+  Attempts are counted before the password check, and the client IP comes from
+  `X-Forwarded-For` only through the proxies `TRUST_PROXY` names. At most 4 scrypt
+  runs at once (N=2^15, r=8, p=1); admin passwords need 14
+  characters. Sign-in errors never say whether the email exists.
+- Tokens, passwords and activation codes are redacted from logs
+  (`create-logger.module.ts`), accepted only in the header or the auth bodies,
+  and never returned except at sign-in.
+- The mobile app never calls `/api/v1/admin`.
+
+### Orders, entitlements and ownership
+
+Phase 3 (decisions D1 to D4 in [plans/athar-v1-plan.md](plans/athar-v1-plan.md)).
+A table record carries the order:
+
+- `ownerAccountId`: the customer who ordered it, or `null`. Set by an admin on
+  `POST`/`PATCH /api/v1/admin/tables`; it must name an existing, non-disabled
+  customer (else `VALIDATION_FAILED`). An unowned table is visible to admins only.
+- `plan`: `basic` (catalogue designs and the rake) or `personalized` (adds the
+  drawing pen and LED ambiences). The map is the one constant `PLAN_FEATURES`
+  in `@athar/contracts`, so moving a feature between plans is a one-line change.
+- `voiceAssistant`: a per-table add-on, independent of the plan.
+
+All three have defaults (`null`, `basic`, `false`), so a tables file written
+before Phase 3 loads unchanged. The public `Table` adds `plan`,
+`voiceAssistant` and `features`, computed only by `featuresFor` (in
+`TablesService`); the owner id is never exposed on it.
+
+**Ownership rule.** `TableRegistry.getFor(tableId, account, use)` is the one
+check. The owner may read and command; an admin may read any table and job but
+not command; everyone else gets `TABLE_NOT_FOUND` (`JOB_NOT_FOUND` for a job),
+never `FORBIDDEN`, so ids cannot be enumerated. Designs are global and need only
+a session. Customers are created, listed, reset and disabled by admins under
+`/api/v1/admin/customers` ([api-conventions.md](api-conventions.md#sessions)).
+Disabling or resetting a customer revokes every session at once.
+
+### Pairing and the drawing conditions
+
+Phase 4 (decision D9). A drawing starts only when the owner's table is enabled,
+paired with this session, online and free, and its plan includes the feature.
+
+- **Pairing.** `POST /api/v1/tables/:tableId/pairing` by the owner opens (or
+  extends) a pairing for (session, table); `DELETE` ends it. It slides: 15
+  minutes past the last pairing request, job start or job command, measured with
+  the injected `Clock`. `PairingStore` (`tables/pairing-store.ts`) keeps it in
+  memory keyed by session id, so a revoked or expired session can never use its
+  pairings again (its token no longer authenticates), and expired entries are
+  dropped on lookup and pruned on every write.
+  - `shortcut: lost on restart and per process; the app re-pairs automatically (Phase 6). Move it to shared storage before running more than one API instance.`
+- **The checks** live in `JobsService.start`, inside its `exclusive()` section
+  before the driver call, so check-then-start cannot race: owner
+  (`TABLE_NOT_FOUND`), design, idempotent replay, enabled (`TABLE_DISABLED`),
+  paired (`PAIRING_REQUIRED`), online (`TABLE_OFFLINE`), free (`TABLE_BUSY`),
+  feature in `featuresFor(table)` (`FEATURE_NOT_IN_PLAN`, from the
+  `FEATURE_FOR_START` map: design `catalogue`, path `drawingPen`, rake `rake`).
+  A replay
+  returns the original job without checking the conditions again. Pause and
+  resume need ownership (in the controller) and a pairing (in the service); stop,
+  the safety action, needs ownership only. A successful command extends an
+  existing pairing.
+- **Readiness.** `GET /api/v1/tables/:tableId` adds
+  `readiness: {paired, online, free, canStart}` for the calling session
+  (`canStart = enabled && paired && online && free`). An admin is never paired.
+- In simulation a pairing proves only "this signed-in owner opened this table
+  recently". The hardware phase adds proof of presence (a code shown on the
+  table) before any real driver is enabled.
+- The mobile app does not pair yet (Phase 6), so until then it cannot start or
+  command a job against this API; the HTTP tests pair explicitly.
+
+### Rake, freehand path and LED ambiences
+
+Phase 5. What the website promises and the `personalized` plan sells.
+
+- **Start kinds.** `POST /tables/:tableId/jobs` takes `kind: 'design' | 'path' | 'rake'`
+  (`design` by default). Each is a normal job through the same state machine,
+  driver call and conditions; there is no "raking" state. `DesignsService`
+  hands `JobsService` a `DrawingPlan` (`{trajectory, estimatedDurationSeconds}`)
+  for each kind, and the duration always comes from `estimateDurationSeconds`,
+  the nominal-speed rule the designs use.
+- **Rake.** `designs/generators/rake.ts`, a pure generator like the designs: an
+  Archimedean spiral from the centre out to rho 0.96 in 20 turns, then straight
+  back to home (`HOME_RHO = 0`), about 17 minutes at the nominal speed. It passes
+  `trajectoryProblems` (the catalogue's checks: within 0..1, starts and ends at
+  home, no step over 0.05, no bowed segment) when `designs.service.ts` loads, so
+  a broken rake stops the process. It is not in the catalogue, whose "exactly 4"
+  rule is unchanged. The pitch is a placeholder for the ball's track width.
+- **Freehand path** (`designs/freehand.ts`). The app sends at most 1000 points;
+  the API joins them with straight lines sampled every 0.01 radii (so no rule
+  is relaxed: finger input with far-apart points is densified, not waved
+  through), prefixes a line from home and appends a return home, then runs the
+  same `trajectoryProblems`. A line passing within 0.02 radii of the centre is
+  drawn through the centre, turning on the spot there, because near the centre
+  the polar interpolation would bow it. Longer than 120 radii (about 33 min), or
+  failing a check: `VALIDATION_FAILED`, decided after the plan check.
+- **LED ambiences.** Data in `designs/data/ambiences.v1.ts`: only the three the
+  website names (Gulf blue, amber, pearl), with Arabic names that need native
+  review. The owner supplies the rest; none are invented. `GET /api/v1/ambiences`
+  lists them. `PUT /api/v1/tables/:tableId/ambience` checks ownership, enabled,
+  pairing, online and `ledAmbiences` (in `TablesService.setAmbience`), then calls
+  `TableDriver.setAmbience`. `DriverStatus.ambienceId` and `Table.ambienceId`
+  report it. It may change while a drawing runs: light and sand are independent,
+  and the simulator keeps drawing.
+- **Voice assistant.** In simulation it is the `voiceAssistant` flag and the
+  `voiceAssistant` feature only; nothing speaks. The hardware driver will own
+  greetings and voice interaction on the table itself, behind `TableDriver`, so
+  nothing above the driver changes when it arrives.
 
 ### The QR code, restated
 
@@ -1478,11 +1624,11 @@ Unchanged from [section 6](#6-qr-code-and-deep-link-flow): the QR encodes only
 `https://<domain>/t/<tableId>`, holds no secret, and is **never proof of
 authorisation**. What provisioning changes is where the id comes from: a random
 server-generated value rather than a hand-typed one. That removes guessable ids
-(`table-1`) but does not make the code a credential. Anyone who photographs a
-printed code can open that table, and until access control exists (open
-decision 2) they can start, pause and stop jobs on it. In this milestone the
-table is simulated, so that is a nuisance; it must be solved before any hardware
-driver.
+(`table-1`) but does not make the code a credential. Since Phase 3 the code
+identifies the table and the owner's session authorises: someone who
+photographs a printed code gets `TABLE_NOT_FOUND`. Since Phase 4 the session
+must also be paired with the table; proof that the owner is physically at the
+table comes with the hardware and is required before any hardware driver.
 
 ### As built: the tables module
 
@@ -1497,12 +1643,13 @@ imported by `AppModule.forRoot(config, tables)`, which receives an
 | `InMemoryTableRepository` | Tests only; one shared contract suite runs against both implementations                                                                                                            |
 | `TableRegistry`           | The admin operations (create, list, get, update, link). Used by the admin controller **and** the `table:create` command                                                            |
 | `TablesService`           | The public view of a table: registration data plus `mode`/`connection` read from the driver on every request                                                                       |
-| `AdminKeyGuard`           | The `ADMIN_API_KEY` check, applied to the whole admin controller                                                                                                                   |
+| `PairingStore`            | In-memory pairings (session, table) with a 15-minute sliding expiry; read by `TablesService` (readiness) and `JobsService` (the drawing conditions)                                |
+| `SessionGuard`            | From `auth/`: with `@Roles('admin')`, applied to the whole admin controller                                                                                                        |
 | `ACTIVE_JOB_LOOKUP`       | **The seam to jobs.** `tables` knows only this one-method interface; `NoActiveJobs` answers `null` until the jobs module provides the real one, so `activeJobId` is `null` for now |
 
 Behaviours worth knowing:
 
-- The admin guard accepts `Authorization: Bearer <key>` with the scheme in any
+- The session guard accepts `Authorization: Bearer <token>` with the scheme in any
   letter case (as HTTP defines it) and a single non-blank token. It runs
   **before** validation, so an unauthenticated caller learns nothing about what a
   valid request looks like, and it sets `WWW-Authenticate: Bearer` itself.
@@ -1628,6 +1775,50 @@ named by `TABLES_DATA_FILE`.
   interface, so every test runs against the real services without touching disk,
   and one shared test suite runs against both implementations.
 
+## Claiming and sharing a table
+
+A table is **provisioned** by an admin, **claimed** by the customer it is sold to,
+and then **shared** by that owner with guests. All three go through one-time or
+limited tokens; the code is in `apps/api/src/access/`.
+
+| Step      | Endpoint                                         | Who      | Result                                                                            |
+| --------- | ------------------------------------------------ | -------- | --------------------------------------------------------------------------------- |
+| Provision | `POST /api/v1/admin/tables/provision`            | admin    | An unowned table, the broker login for its controller, and a claim link (30 days) |
+| Re-issue  | `POST /api/v1/admin/tables/:tableId/claim-token` | admin    | A new claim link for a table still unowned; the old one stops working             |
+| Claim     | `POST /api/v1/tables/pair`                       | customer | The customer becomes the owner; the token is spent                                |
+| Share     | `POST /api/v1/tables/:tableId/shares`            | owner    | A link (1 h to 7 days, 1 to 10 uses) that makes a guest                           |
+| Join      | `POST /api/v1/tables/pair`                       | customer | The customer becomes a guest until the link expires                               |
+
+- **What a QR code holds.** `<origin>/pair?tableId=..&token=..` on
+  `PUBLIC_LINK_BASE_URL` (or `athar://pair?...`, which the app also accepts and which
+  is the only form in development). It never holds a broker credential. The
+  table's own link, `/t/<id>`, still holds nothing but the id.
+- **Tokens** are 256 random bits, shown once. Only their SHA-256 is stored, in
+  `TABLE_ACCESS_DATA_FILE` together with the guests. Redeeming a token checks it
+  and spends a use in one serialized step, so a single-use token is won by exactly
+  one of any number of simultaneous requests. Unknown, expired, used-up, revoked or
+  for-another-table all answer `PAIRING_TOKEN_INVALID`, so a caller cannot tell
+  which tokens exist. Tokens are not logged.
+- **The owner stays in the table record** (`ownerAccountId`); claiming writes it.
+  A valid claim code for a table that already has an owner is
+  `TABLE_ALREADY_CLAIMED` and is not spent. If writing the owner fails, the use is
+  given back.
+- **A guest** may read and command the table (start and stop drawings, set the
+  light) until the end of the link they used; they may not share it. `mayUse` has
+  three uses: `read`, `command`, `manage`. The owner may do all three, a guest the
+  first two, an admin only `read`. Anyone else is told the table does not exist.
+  Revoking a guest before the link ends, and listing guests, are not built yet.
+- **The broker login** returned by provisioning is generated but not registered
+  on the broker (see [deployment.md](deployment.md#hardware-mode-mqtt)).
+- **The light** (`PUT /api/v1/tables/:tableId/light`) takes off, on, a colour with a
+  brightness, or a named ambience, for an owner or a guest of a table whose plan
+  has `ledAmbiences`. The driver reports only a named ambience, so any other light
+  reads as no ambience.
+
+shortcut: claiming writes the token store and then the table file, which are two
+files with no transaction; a failure between them is compensated, not atomic.
+Both move to one database when there is one.
+
 ## 9. Open decisions
 
 Everything below is a **proposal or an unanswered question**, not a confirmed
@@ -1636,7 +1827,7 @@ requirement.
 | #   | Decision                            | Current proposal in this document                                                                                                                                                                                                                                                                                                                                                                                                                    | Settled by           |
 | --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
 | 1   | Trajectory format                   | **Home radius (provisional): the centre, `HOME_RHO = 0`.** `polar-theta-rho/v1`: unwrapped theta, rho normalised to table radius, polar-linear interpolation                                                                                                                                                                                                                                                                                         | Mechanics choice     |
-| 2   | Access control                      | Public endpoints: none in this milestone; simulation only; mandatory before any hardware driver. (Admin endpoints are protected by `ADMIN_API_KEY`; see decision 18.) Candidates: pairing proof at the table, signed rotating QR, accounts. **Without access control, any visitor can pause or stop another visitor's drawing** (see decision 10); this must be addressed together with access control, not separately                               | Product and security |
+| 2   | Access control                      | Public endpoints: none in this milestone; simulation only; mandatory before any hardware driver. (Admin endpoints require an admin session; see decision 18.) Candidates: pairing proof at the table, signed rotating QR, accounts. **Without access control, any visitor can pause or stop another visitor's drawing** (see decision 10); this must be addressed together with access control, not separately                                       | Product and security |
 | 3   | Hosting and domain                  | A static install page and `.well-known` files on one HTTPS domain; where the API is hosted is not decided. The domain is also `PUBLIC_LINK_BASE_URL`, baked into every printed QR code, so it must be stable for the life of the products                                                                                                                                                                                                            | Product and ops      |
 | 4   | Real-time transport                 | Poll `GET /jobs/:jobId` about once per second; SSE or WebSocket later, fed by `drawing-jobs`                                                                                                                                                                                                                                                                                                                                                         | After measuring      |
 | 5   | Hardware transport                  | **Decided:** the command path is phone → backend (over the internet) → table controller, with the simulator standing in for the controller for now; the table connects to the backend over the network and the phone is never in the path. **Open:** the controller hardware, the protocol between gateway and controller, and whether the gateway is its own process (proposed). Absent from the interface; owned by a future `HardwareTableDriver` | Mechanics choice     |
@@ -1652,8 +1843,8 @@ requirement.
 | 15  | Domain error codes in the filter    | Let domain exceptions carry their own `code` (closes gap 3.6)                                                                                                                                                                                                                                                                                                                                                                                        | API team             |
 | 16  | Table-id and link-host policy       | Shared table-id schema; HTTPS links accepted only from an allow-listed host list                                                                                                                                                                                                                                                                                                                                                                     | Product and mobile   |
 | 17  | Languages                           | English and Arabic from the start; RTL-ready layouts; UI strings in translation files; design text localised as `{ en, ar }` (title, description, inspiration note). Open: localising table `displayName`/`location` and source labels, which language is the default, and who writes and reviews the Arabic content                                                                                                                                 | Product              |
-| 18  | Real admin accounts                 | `ADMIN_API_KEY` is a shared secret with no identity, audit trail or per-person revocation; rotation means a redeploy. Real accounts (individual admins, roles, audit log of who registered or disabled which table) replace it before more than a handful of operators exist                                                                                                                                                                         | Product and security |
+| 18  | Real admin accounts                 | **Done (Athar v1, Phase 2):** individual admin accounts with sessions replaced the shared key. Still open: an audit log of who registered or disabled which table                                                                                                                                                                                                                                                                                    | Product and security |
 | 19  | Production database (PostgreSQL)    | Tables in a JSON file (single instance, atomic rename), jobs in memory, for this milestone. PostgreSQL is the expected production store (multi-instance, queries, migrations, job history that survives restarts); retention, backup and migration policy settled first, as in `future-infrastructure-decisions.md`. The repository interfaces are the seam                                                                                          | Product and ops      |
 | 20  | QR library and artwork              | `qrcode` (plain JavaScript, SVG and PNG from one API), level Q, 4-module quiet zone; licence (MIT) and maintenance (last release August 2024) verified, see "QR generation CLI". Branded or logo-bearing codes are not proposed, because a logo costs error-correction capacity                                                                                                                                                                      | Product and design   |
-| 21  | Admin exposure and abuse protection | Admin routes share the public host and port and rely on a 32+ character key alone. Open: serving them on a separate host or port, an IP or network allow-list, rate limiting (also needed publicly), and key rotation                                                                                                                                                                                                                                | Product and ops      |
+| 21  | Admin exposure and abuse protection | Admin routes share the public host and port. Sign-in is rate limited per email and IP (in memory). Open: serving admin routes on a separate host or port, an IP or network allow-list, and rate limiting of the public endpoints                                                                                                                                                                                                                     | Product and ops      |
 | 22  | Table retirement                    | No delete endpoint: a table is disabled, because its QR code is already printed and jobs reference its id. Open: what a scan of a retired code should show, and whether ids are ever reissued (proposed: never)                                                                                                                                                                                                                                      | Product              |

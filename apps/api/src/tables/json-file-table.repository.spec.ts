@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DISABLED_TABLE, ENABLED_TABLE } from '../../test/table-fixtures.js';
@@ -107,6 +107,64 @@ describe('JsonFileTableRepository', () => {
       expect(text.endsWith('\n')).toBe(true);
       expect(text).toContain('\n  "version": 1,');
       expect(JSON.parse(text)).toStrictEqual({ version: 1, tables: [ENABLED_TABLE] });
+    });
+  });
+
+  describe('a file written before orders existed', () => {
+    // Exactly what commit 0965207 wrote: no ownerAccountId, plan, voiceAssistant or geometry.
+    const OLD_FORMAT = `{
+  "version": 1,
+  "tables": [
+    {
+      "id": "k7q3x9m2d8r5t6w4",
+      "displayName": "Main hall",
+      "location": "Ground floor",
+      "enabled": true,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
+`;
+
+    it('loads, each table unowned, basic and without the voice assistant', async () => {
+      await writeFile(file, OLD_FORMAT);
+      const repository = await open();
+
+      expect(await repository.list()).toStrictEqual([
+        {
+          id: 'k7q3x9m2d8r5t6w4',
+          displayName: 'Main hall',
+          location: 'Ground floor',
+          enabled: true,
+          ownerAccountId: null,
+          plan: 'basic',
+          voiceAssistant: false,
+          // The placeholder: an old file has no size, and must still load.
+          geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('writes the new fields back on the next change', async () => {
+      await writeFile(file, OLD_FORMAT);
+      const repository = await open();
+
+      await repository.update('k7q3x9m2d8r5t6w4', {
+        plan: 'personalized',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      });
+
+      expect(
+        (JSON.parse(await readFile(file, 'utf8')) as { tables: unknown[] }).tables[0],
+      ).toMatchObject({
+        ownerAccountId: null,
+        plan: 'personalized',
+        voiceAssistant: false,
+        geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
+      });
     });
   });
 
@@ -401,6 +459,44 @@ describe('JsonFileTableRepository', () => {
       await writeFile(`${file}.lock`, '999999999');
 
       await expect(open()).resolves.toBeInstanceOf(JsonFileTableRepository);
+    });
+
+    it.each([
+      ['this host', () => `${process.pid}:${hostname()}`],
+      ['an older build (pid only)', () => String(process.pid)],
+    ])(
+      'takes over a lock from %s naming its own pid that it does not hold, as after a container restart as PID 1',
+      async (_label, content) => {
+        await writeFile(`${file}.lock`, content());
+
+        await expect(open()).resolves.toBeInstanceOf(JsonFileTableRepository);
+        expect(await readFile(`${file}.lock`, 'utf8')).toBe(`${process.pid}:${hostname()}`);
+      },
+    );
+
+    it('refuses a lock naming its own pid from a different host, which it cannot check', async () => {
+      const lock = `${process.pid}:another-container`;
+      await writeFile(`${file}.lock`, lock);
+
+      const failure = await open().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(failure).toBeInstanceOf(StartupConfigurationError);
+      expect((failure as StartupConfigurationError).message).toContain('on host another-container');
+      expect(await readFile(`${file}.lock`, 'utf8')).toBe(lock);
+    });
+
+    it('rejects writes after close', async () => {
+      const repository = await open();
+      await repository.close();
+
+      await expect(repository.create(ENABLED_TABLE)).rejects.toThrow('closed');
+      await expect(
+        repository.update('table-001', { enabled: false, updatedAt: 'x' }),
+      ).rejects.toThrow('closed');
+      expect(await filesIn(directory)).toStrictEqual(['tables.json']);
     });
 
     it('refuses a lock file that names no process, and says how to clear it', async () => {

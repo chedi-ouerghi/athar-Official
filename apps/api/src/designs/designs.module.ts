@@ -7,6 +7,7 @@ import {
 } from './design-collection.js';
 import { DESIGN_COLLECTION, DesignsService } from './designs.service.js';
 import { DesignsController } from './designs.controller.js';
+import { AmbiencesController } from './ambiences.controller.js';
 
 /**
  * The design library.
@@ -24,7 +25,7 @@ export class DesignsModule {
     return {
       module: DesignsModule,
       global: true,
-      controllers: [DesignsController],
+      controllers: [DesignsController, AmbiencesController],
       providers: [{ provide: DESIGN_COLLECTION, useValue: collection }, DesignsService],
       exports: [DesignsService],
     };

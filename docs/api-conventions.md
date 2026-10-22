@@ -112,15 +112,133 @@ body, a bare `HttpException`) keep their existing mapping, so a bare 409 is stil
 and answered with `An unexpected error occurred.` A raw message can embed file
 paths or connection strings.
 
-## Admin endpoints
+## Sessions
 
-Everything under `/api/v1/admin` requires `Authorization: Bearer <ADMIN_API_KEY>`.
-Any failure to authenticate (no header, wrong scheme, wrong key, or a server with
-no key configured) is the same response: `401`, code `UNAUTHORIZED`, the message
-"Authentication is required.", and `WWW-Authenticate: Bearer`. The check runs
-before request validation. Throw `DomainException('UNAUTHORIZED', ...)` from any
-future guard in the same way. Public endpoints never return `UNAUTHORIZED`. See
-[architecture.md](architecture.md#admin-authentication).
+Sign in with `POST /api/v1/auth/login` (`{email, password}`) or, the first time,
+`POST /api/v1/auth/activate` (`{email, activationCode, password}`). Both return
+`{accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt, account}`.
+Send `Authorization: Bearer <accessToken>` (header only, never URL or body) to
+`GET /api/v1/auth/me`, `POST /api/v1/auth/logout` (`204`) and everything under
+`/api/v1/admin` (role `admin`). Exchange the refresh token at
+`POST /api/v1/auth/refresh` (`{refreshToken}`) for a new pair; each refresh token
+works once.
+
+**Every table, design and job endpoint needs a session too.** Only `/health`,
+`/ready`, login, activate and refresh are open.
+
+**Ownership.** A table belongs to the customer the admin assigned it to
+(`ownerAccountId`). On `/api/v1/tables/:tableId`, `/tables/:tableId/jobs` and
+`/api/v1/jobs/:jobId`:
+
+- the owner may read and command (start, pause, resume, stop);
+- an admin may read any table, history and job, but does not command them;
+- anyone else gets `TABLE_NOT_FOUND` (or `JOB_NOT_FOUND` for a job), exactly as
+  for an id that does not exist, never `FORBIDDEN`, so ids cannot be probed.
+
+**Pairing and the drawing conditions** (decision D9). Before starting or commanding
+a job, the owner's session pairs with the table:
+
+| Route                                    | Answer                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| `POST /api/v1/tables/:tableId/pairing`   | `200 {tableId, expiresAt}`, creating or extending this session's pairing |
+| `DELETE /api/v1/tables/:tableId/pairing` | `204`, also when there was no pairing                                    |
+
+Only the owner may pair (anyone else, admins included: `TABLE_NOT_FOUND`). A
+pairing belongs to one session: another sign-in of the same owner is not paired,
+and a session that is revoked or expires takes its pairings with it. It lasts 15
+minutes from the last pairing request, job start or job command, whichever came
+last. Pairings live in memory and are lost when the API restarts; the app re-pairs.
+
+`POST /api/v1/tables/:tableId/jobs` checks, in this order, and answers the first
+failure: session (`UNAUTHORIZED`), validation, the caller owns the table
+(`TABLE_NOT_FOUND`), the design exists (`DESIGN_NOT_FOUND`), a repeated
+`clientRequestId` (the original job, `200`, or `IDEMPOTENCY_CONFLICT`), then the
+drawing conditions: enabled (`TABLE_DISABLED`), paired (`PAIRING_REQUIRED`),
+online (`TABLE_OFFLINE`), free (`TABLE_BUSY`), and the plan includes the feature
+(`FEATURE_NOT_IN_PLAN`). A repeat returns the original job without checking the
+conditions again, so a retry after a lost response cannot fail on a lapsed
+pairing. Pause and resume need ownership (`JOB_NOT_FOUND`) and a pairing
+(`PAIRING_REQUIRED`); stop, the safety action, needs ownership only.
+
+**What a start draws** (Phase 5). The body is one of three kinds, told apart by
+`kind`; each needs one feature of the table's plan:
+
+| Body                                           | Draws                       | Feature      |
+| ---------------------------------------------- | --------------------------- | ------------ |
+| `{kind?: 'design', designId, clientRequestId}` | a catalogue design          | `catalogue`  |
+| `{kind: 'path', path, clientRequestId}`        | the owner's freehand path   | `drawingPen` |
+| `{kind: 'rake', clientRequestId}`              | the rake (smooths the sand) | `rake`       |
+
+`kind` defaults to `design`, so a body without it (every client before Phase 5)
+still means a design. `path` is `[[theta, rho], ...]` in the `polar-theta-rho/v1`
+convention: 2 to `DRAWING_PATH_MAX_POINTS` (1000) points, rho within 0..1 (about
+40 kB of JSON, well inside the body cap). The API joins the points with straight
+lines, adds a line from home to the first point and back home at the end, and
+checks the result like a design ([architecture.md](architecture.md#rake-freehand-path-and-led-ambiences));
+a path it cannot draw, or longer than 120 table radii, is `VALIDATION_FAILED`.
+That check runs after the plan check, so a basic table gets `FEATURE_NOT_IN_PLAN`
+for any path. The job says what it drew: `kind`, and `designId` (`null` for a
+path or the rake). A repeated `clientRequestId` must repeat the same request:
+same kind, same design, or the same path point for point (compared by a SHA-256
+of the parsed path); anything else is `IDEMPOTENCY_CONFLICT`.
+
+**LED ambiences** (feature `ledAmbiences`):
+
+| Route                                                 | Answer                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| `GET /api/v1/ambiences`                               | `200 {ambiences: [{id, name: {en, ar}, color}]}`, any session |
+| `PUT /api/v1/tables/:tableId/ambience` `{ambienceId}` | `200` the table, now with `ambienceId`                        |
+
+The `PUT` checks, in order: session, validation, the ambience exists
+(`VALIDATION_FAILED`), the caller owns the table (`TABLE_NOT_FOUND`), enabled
+(`TABLE_DISABLED`), paired (`PAIRING_REQUIRED`), online (`TABLE_OFFLINE`), and
+the plan includes `ledAmbiences` (`FEATURE_NOT_IN_PLAN`). It works while a
+drawing runs: the light is independent of the sand. Like a job command, it
+extends the pairing. A table's `ambienceId` comes from the driver, `null` until
+one is set; the simulator forgets it when the API restarts.
+
+`GET /api/v1/tables/:tableId` carries `readiness: {paired, online, free, canStart}`
+for the calling session, with `canStart = enabled && paired && online && free`,
+so the app can say why it cannot start. An admin is never paired.
+
+Designs are the same for every account: any session may read them. A table's
+`features` come from its `plan` and `voiceAssistant` through `featuresFor` in
+`@athar/contracts`; clients read them and never derive them.
+
+**Customers (admin only).** Under `/api/v1/admin/customers`:
+
+| Route                           | Answer                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| `POST /` `{email, displayName}` | `201 {account, activationCode}`; the code is shown here once, never again         |
+| `GET /`                         | `200 {customers}`, each with `status`: `pending-activation`, `active`, `disabled` |
+| `POST /:accountId/reset-access` | `200 {account, activationCode}`; clears the password, ends every session          |
+| `POST /:accountId/disable`      | `200` the customer, `disabled`; ends every session                                |
+
+An email already in use (by any account) is `ACCOUNT_EXISTS`. An unknown id, or
+the id of an admin, is `NOT_FOUND`. Reset does not re-enable a disabled
+customer. `POST` and `PATCH /api/v1/admin/tables` accept `ownerAccountId`
+(`null` removes the owner), `plan` (`basic` | `personalized`) and
+`voiceAssistant`; an owner that is not an existing, non-disabled customer is
+`VALIDATION_FAILED`.
+
+| Code                  | Status | Meaning                                                                                                            |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| `UNAUTHORIZED`        | 401    | No `Bearer` token, or one the server does not know                                                                 |
+| `SESSION_EXPIRED`     | 401    | Token expired or revoked, or a refresh failed: refresh, else sign in                                               |
+| `INVALID_CREDENTIALS` | 401    | Sign-in failed; same answer whether or not the email exists                                                        |
+| `ACTIVATION_INVALID`  | 400    | Wrong, used or expired activation code; same answer for an unknown email                                           |
+| `ACCOUNT_EXISTS`      | 409    | An admin tried to create a customer with an email already in use                                                   |
+| `FORBIDDEN`           | 403    | Signed in, but the role may not use the route                                                                      |
+| `TOO_MANY_REQUESTS`   | 429    | Too many attempts: 5 failures per email and IP in 15 min, 20 per email in an hour, or 30 attempts per IP in 15 min |
+| `PAIRING_REQUIRED`    | 409    | This session is not paired with the table, or its pairing expired: pair again                                      |
+| `FEATURE_NOT_IN_PLAN` | 403    | The table's plan does not include what the request needs                                                           |
+
+Reusing a refresh token revokes the whole session, including when a client retries
+a refresh whose answer it never received. The app treats `SESSION_EXPIRED` from
+`/auth/refresh` as "sign in again"; there is no grace window.
+
+Every `401` carries `WWW-Authenticate: Bearer`. The guard runs before request
+validation. See [architecture.md](architecture.md#admin-authentication).
 
 ## Correlation ids
 

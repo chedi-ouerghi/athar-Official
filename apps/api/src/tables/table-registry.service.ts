@@ -6,11 +6,13 @@
  * registered over HTTP are created by exactly the same code.
  */
 
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { UpdateTableRequest } from '@athar/contracts';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { DEFAULT_TABLE_GEOMETRY } from '@athar/contracts';
+import type { AuthAccount, Plan, TableGeometry, UpdateTableRequest } from '@athar/contracts';
 import { APP_CONFIG, type AppConfig } from '../config/app-config.js';
 import { CLOCK, type Clock } from '../device/clock.js';
 import { DomainException } from '../common/http/domain.exception.js';
+import { GUEST_LOOKUP, type GuestLookup } from './guest-lookup.js';
 import { buildTableLink } from './table-link.js';
 import {
   TABLE_REPOSITORY,
@@ -23,11 +25,49 @@ import {
 export const TABLE_ID_GENERATOR = Symbol('TABLE_ID_GENERATOR');
 export type TableIdGenerator = () => string;
 
-/** What registering a table needs; `enabled` has already been defaulted. */
+/**
+ * What registering a table needs; `enabled` has already been defaulted. The
+ * order fields default to no owner, `basic` and no voice assistant.
+ */
 export interface NewTable {
   readonly displayName: string;
   readonly location: string;
   readonly enabled: boolean;
+  readonly ownerAccountId?: string | null;
+  /** The customer whose QR code claims it (see `reservedForAccountId`). */
+  readonly reservedForAccountId?: string | null;
+  readonly plan?: Plan;
+  readonly voiceAssistant?: boolean;
+  /** Shape and X/Y size; the placeholder when left out. */
+  readonly geometry?: TableGeometry;
+}
+
+/**
+ * Reading a table (or its jobs), changing what it does (starting and commanding
+ * jobs, its light), or managing who else may use it (sharing).
+ */
+export type TableUse = 'read' | 'command' | 'manage';
+
+/**
+ * Who may use a table (decision D1): its owner, for anything; a guest (someone the
+ * owner shared it with, while that lasts), to read and command but not to manage;
+ * an admin, only to read. Everyone else is told the table does not exist.
+ */
+export function mayUse(
+  table: TableRecord,
+  account: AuthAccount,
+  use: TableUse,
+  guest = false,
+): boolean {
+  if (table.ownerAccountId === account.id) {
+    return true;
+  }
+
+  if (guest) {
+    return use !== 'manage';
+  }
+
+  return use === 'read' && account.role === 'admin';
 }
 
 /** How many times to retry after generating an id that is already taken. */
@@ -42,6 +82,7 @@ export class TableRegistry {
     @Inject(APP_CONFIG) private readonly config: Pick<AppConfig, 'publicLinkBaseUrl'>,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(TABLE_ID_GENERATOR) private readonly newId: TableIdGenerator,
+    @Optional() @Inject(GUEST_LOOKUP) private readonly guests?: GuestLookup,
   ) {}
 
   /** Register a table under a freshly generated id. The caller never chooses the id. */
@@ -54,6 +95,14 @@ export class TableRegistry {
         displayName: input.displayName,
         location: input.location,
         enabled: input.enabled,
+        ownerAccountId: input.ownerAccountId ?? null,
+        // Only a table made for a customer carries the field.
+        ...(input.reservedForAccountId === undefined
+          ? {}
+          : { reservedForAccountId: input.reservedForAccountId }),
+        plan: input.plan ?? 'basic',
+        voiceAssistant: input.voiceAssistant ?? false,
+        geometry: input.geometry ?? DEFAULT_TABLE_GEOMETRY,
         createdAt: now,
         updatedAt: now,
       };
@@ -92,11 +141,36 @@ export class TableRegistry {
   }
 
   /**
-   * Change a table's display name, location or `enabled` switch.
+   * The table, if `account` may use it (see {@link mayUse}). One it may not use
+   * is `TABLE_NOT_FOUND`, exactly like a missing one, so ids cannot be probed.
    *
    * @throws DomainException `TABLE_NOT_FOUND`
    */
-  async update(tableId: string, patch: UpdateTableRequest): Promise<TableRecord> {
+  async getFor(
+    tableId: string,
+    account: AuthAccount,
+    use: TableUse = 'read',
+  ): Promise<TableRecord> {
+    const record = await this.repository.get(tableId);
+
+    const guest = this.guests?.isGuest(tableId, account.id, this.clock.now()) ?? false;
+
+    if (record === undefined || !mayUse(record, account, use, guest)) {
+      throw tableNotFound(tableId);
+    }
+
+    return record;
+  }
+
+  /**
+   * Change a table's display name, location, `enabled` switch or order.
+   *
+   * @throws DomainException `TABLE_NOT_FOUND`
+   */
+  async update(
+    tableId: string,
+    patch: UpdateTableRequest | { readonly reservedForAccountId: string | null },
+  ): Promise<TableRecord> {
     const updated = await this.repository.update(tableId, {
       ...patch,
       updatedAt: new Date(this.clock.now()).toISOString(),

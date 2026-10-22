@@ -15,6 +15,8 @@ const id = encodeURIComponent;
 export const routes = {
   home: (): Href => href('/'),
   scan: (): Href => href('/scan'),
+  pair: (tableId: string, token: string): Href =>
+    href(`/pair?tableId=${id(tableId)}&token=${id(token)}`),
   diagnostics: (): Href => href('/diagnostics'),
   table: (tableId: string): Href => href(`/t/${id(tableId)}`),
   design: (tableId: string, designId: string): Href =>

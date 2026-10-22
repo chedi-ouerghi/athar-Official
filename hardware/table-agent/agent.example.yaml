@@ -1,0 +1,47 @@
+# Athar — agent Raspberry Pi 5 (/etc/athar/agent.yaml)
+# La CALIBRATION PHYSIQUE vit ici, sur la table — pas dans l'API.
+
+table:
+  id: REPLACE_WITH_TABLE_ID # id généré par table-create (ex: gsbdul574ds4dhvc) == username MQTT (l'ACL utilise %u)
+
+mqtt:
+  # Test sur place (deploy/docker-compose.local.yml, agent sur le même Pi que le broker) :
+  #   url: mqtt://127.0.0.1:1883   (sans TLS : retirer ca_file ci-dessous)
+  # Stack de test GCP (deploy/) : wss://mqtt.<domaine> (port 443, TLS géré par Caddy).
+  # Broker avec son propre TLS (hardware/broker/mosquitto.conf) : mqtts://<hôte>:8883.
+  url: wss://mqtt.REPLACE_DOMAIN
+  username: REPLACE_WITH_TABLE_ID
+  password_file: /etc/athar/mqtt.secret # chmod 600, jamais dans le yaml
+  ca_file: /etc/ssl/certs/ca-certificates.crt
+  keepalive_s: 30
+  clean_session: false # reçoit les cmd QoS1 envoyées pendant une coupure
+  # Last Will : le broker publie "offline" tout seul si le Pi disparaît.
+  # Le payload est le TEXTE BRUT `offline` (devicePresenceSchema dans device-protocol.ts),
+  # pas du JSON : l'API ignorerait `{"online":false}` et la table ne passerait jamais hors ligne.
+  # Au démarrage, l'agent publie `online` (retain) sur le même topic.
+  will:
+    topic: athar/v1/t/REPLACE_WITH_TABLE_ID/presence
+    payload: offline
+    qos: 1
+    retain: true
+
+board:
+  port: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0 # CH340 du DLC32 (stable, ≠ ttyUSB0)
+  baud: 115200
+  planner_buffer_lines: 12 # streaming G-code : max lignes "en vol" sans 'ok'
+  status_poll_ms: 250 # requête temps réel '?'  -> <Idle|MPos:...>
+
+geometry: # mesuré sur TA table, vérifié au montage
+  shape: circle
+  radius_mm: 300 # rho = 1.0  <=> 300 mm
+  rho_margin: 0.02 # ne jamais envoyer rho > 0.98 (bille contre le bord)
+  # Couplage : sur un bras où le moteur rho est fixe au bâti, tourner le bras
+  # fait bouger le chariot. Correction appliquée par le Pi :
+  #   Y_cmd = rho_mm + coupling_mm_per_deg * theta_deg
+  coupling_mm_per_deg: 0.0 # TODO: mesurer (tourner 360° moteur rho coupé, mesurer le déplacement /360)
+
+motion:
+  ball_speed_mm_s: 30 # vitesse linéaire de la BILLE dans le sable
+  max_theta_deg_per_s: 60
+  segment_max_deg: 2 # découpe des longs arcs pour garder une vitesse constante
+  rewrap_theta_when_idle: true # G92 pour ramener X dans [0,360) (précision float)

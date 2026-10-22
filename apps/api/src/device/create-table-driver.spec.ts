@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createTestConfig } from '../../test/create-test-config.js';
-import { StartupConfigurationError } from '../config/startup-configuration.error.js';
 import { FakeClock, ManualScheduler } from './fake-clock.js';
-import { HARDWARE_MODE_UNAVAILABLE_MESSAGE, createTableDriver } from './create-table-driver.js';
+import { createTableDriver } from './create-table-driver.js';
+import { FakeMqttClient } from './hardware/fake-mqtt-client.js';
+import { MqttTableDriver } from './hardware/mqtt-table-driver.js';
 import { SimulatedTableDriver } from './simulated-table-driver.js';
 
 describe('createTableDriver', () => {
@@ -48,29 +49,28 @@ describe('createTableDriver', () => {
   });
 
   describe('TABLE_MODE=hardware', () => {
-    it('refuses with a StartupConfigurationError', () => {
-      expect(() => createTableDriver(createTestConfig({ TABLE_MODE: 'hardware' }))).toThrow(
-        StartupConfigurationError,
-      );
-    });
-
-    it('uses the message the documentation promises, word for word', () => {
-      expect(HARDWARE_MODE_UNAVAILABLE_MESSAGE).toBe(
-        'TABLE_MODE=hardware is not available: no hardware table driver is installed in this build.\n' +
-          'Set TABLE_MODE=simulation.',
-      );
-      expect(() => createTableDriver(createTestConfig({ TABLE_MODE: 'hardware' }))).toThrow(
-        HARDWARE_MODE_UNAVAILABLE_MESSAGE,
-      );
-    });
-
-    it('starts no ticking before refusing', () => {
+    it('builds the MQTT driver, and starts no simulator ticking', () => {
       const scheduler = new ManualScheduler();
 
-      expect(() =>
-        createTableDriver(createTestConfig({ TABLE_MODE: 'hardware' }), { scheduler }),
-      ).toThrow(StartupConfigurationError);
+      const driver = createTableDriver(createTestConfig({ TABLE_MODE: 'hardware' }), {
+        scheduler,
+        mqttClient: new FakeMqttClient(),
+      });
+
+      expect(driver).toBeInstanceOf(MqttTableDriver);
+      expect(driver.mode).toBe('hardware');
       expect(scheduler.active).toBe(0);
+    });
+
+    it('does not wait for the broker: every table reads as offline until it is heard', async () => {
+      const driver = createTableDriver(createTestConfig({ TABLE_MODE: 'hardware' }), {
+        mqttClient: new FakeMqttClient(),
+      });
+
+      expect(await driver.getStatus('table-001')).toMatchObject({
+        mode: 'hardware',
+        connection: 'offline',
+      });
     });
   });
 });

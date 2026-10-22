@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { StartupConfigurationError } from '../src/config/startup-configuration.error.js';
-import { HARDWARE_MODE_UNAVAILABLE_MESSAGE } from '../src/device/create-table-driver.js';
+import { FakeMqttClient } from '../src/device/hardware/fake-mqtt-client.js';
+import { MqttTableDriver } from '../src/device/hardware/mqtt-table-driver.js';
 import { SimulatedTableDriver } from '../src/device/simulated-table-driver.js';
 import { TABLE_DRIVER, type TableDriver } from '../src/device/table-driver.js';
 import { createTestApp } from './create-test-app.js';
@@ -39,13 +39,19 @@ describe('device layer in the application', () => {
     expect(driver.running).toBe(false);
   });
 
-  it('refuses to start with TABLE_MODE=hardware, with the documented message', async () => {
-    const failure = await createTestApp({ TABLE_MODE: 'hardware' }).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+  it('binds the MQTT driver with TABLE_MODE=hardware, and ends its connection on close', async () => {
+    const mqttClient = new FakeMqttClient();
+    const app = await createTestApp({ TABLE_MODE: 'hardware' }, { mqttClient });
+    const driver = app.get<TableDriver>(TABLE_DRIVER);
 
-    expect(failure).toBeInstanceOf(StartupConfigurationError);
-    expect((failure as StartupConfigurationError).message).toBe(HARDWARE_MODE_UNAVAILABLE_MESSAGE);
+    expect(driver).toBeInstanceOf(MqttTableDriver);
+    expect(await driver.getStatus('table-001')).toMatchObject({
+      mode: 'hardware',
+      connection: 'offline',
+    });
+
+    await app.close();
+
+    expect(mqttClient.ended).toBe(true);
   });
 });

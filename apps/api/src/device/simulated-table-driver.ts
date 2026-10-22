@@ -32,6 +32,7 @@
  */
 
 import { Logger } from '@nestjs/common';
+import type { Light } from '@athar/contracts';
 import type { Cancel, Clock, Scheduler } from './clock.js';
 import {
   DriverError,
@@ -95,6 +96,8 @@ interface SimulatedJob {
 interface TableState {
   connection: SimulatedConnection;
   job: SimulatedJob | null;
+  /** The LED ambience shown, or null before one was set. */
+  ambienceId: string | null;
   readonly listeners: Set<Listener>;
   /** Events waiting to be delivered, in order. */
   readonly queue: DriverEvent[];
@@ -230,6 +233,31 @@ export class SimulatedTableDriver implements TableDriver {
     });
   }
 
+  setAmbience(tableId: string, ambienceId: string): Promise<void> {
+    return this.setLight(tableId, { mode: 'preset', ambienceId });
+  }
+
+  /**
+   * Stored and announced; a drawing in progress carries on. The simulator keeps
+   * only the named ambience a status can report: any other light reads as none.
+   */
+  setLight(tableId: string, light: Light): Promise<void> {
+    return this.run(() => {
+      const state = this.stateOf(tableId);
+      this.settle(tableId, state);
+
+      if (state.connection !== 'online') {
+        throw new DriverError(
+          state.connection === 'offline' ? 'OFFLINE' : 'FAULT',
+          `Table ${tableId} is ${state.connection}.`,
+        );
+      }
+
+      state.ambienceId = light.mode === 'preset' ? light.ambienceId : null;
+      this.announce(tableId, state, true);
+    });
+  }
+
   subscribe(tableId: string, listener: Listener): Unsubscribe {
     const { listeners } = this.stateOf(tableId);
     listeners.add(listener);
@@ -334,6 +362,7 @@ export class SimulatedTableDriver implements TableDriver {
       state = {
         connection: 'online',
         job: null,
+        ambienceId: null,
         listeners: new Set(),
         queue: [],
         delivering: false,
@@ -423,6 +452,7 @@ export class SimulatedTableDriver implements TableDriver {
       jobId: job?.jobId ?? null,
       progress: job?.progress ?? 0,
       errorCode: job?.errorCode ?? null,
+      ambienceId: state.ambienceId,
       observedAt: new Date(this.clock.now()).toISOString(),
     };
   }
@@ -440,6 +470,7 @@ export class SimulatedTableDriver implements TableDriver {
       status.jobId,
       status.progress,
       status.errorCode,
+      status.ambienceId,
     ].join('|');
 
     if (!force && fingerprint === state.lastAnnounced) {

@@ -12,7 +12,7 @@ import {
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InMemoryTableRepository } from '../src/tables/in-memory-table.repository.js';
-import { TEST_ADMIN_KEY, createTimedApp, type TimedApp } from './create-test-app.js';
+import { bearer, createTimedApp, signIn, type TimedApp } from './create-test-app.js';
 import { fixtureTables } from './table-fixtures.js';
 
 /**
@@ -24,8 +24,6 @@ import { fixtureTables } from './table-fixtures.js';
  * three seconds of fake time, advanced by hand: nothing here waits.
  */
 
-const ADMIN = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
-
 let current: TimedApp | undefined;
 
 afterEach(async () => {
@@ -33,25 +31,57 @@ afterEach(async () => {
   current = undefined;
 });
 
-/** Everything a test does over HTTP, with the answers parsed against the shared contracts. */
-function client(timed: TimedApp) {
-  const http = () => request(timed.app.getHttpServer());
+/**
+ * Everything a test does over HTTP, with the answers parsed against the shared
+ * contracts. Every request is the signed-in customer's, who owns every table
+ * `createTable` registers (and any table `claim`ed) and has paired with it, as
+ * the app does on opening a table; the admin calls set their own header over it.
+ */
+async function client(timed: TimedApp) {
+  const customer = await signIn(timed.app, 'customer');
+  const http = () => request.agent(timed.app.getHttpServer()).set(bearer(customer));
   const job = (body: unknown): DrawingJob => drawingJobSchema.parse(body);
   const errorOf = (body: unknown) => apiErrorResponseSchema.parse(body).error;
+
+  // A fresh admin session each time: the fake clock may have outlived the last one.
+  const admin = async () => bearer(await signIn(timed.app));
 
   return {
     http,
     job,
     errorOf,
+    admin,
 
     async createTable(overrides: Record<string, unknown> = {}): Promise<string> {
       const response = await http()
         .post('/api/v1/admin/tables')
-        .set(ADMIN)
-        .send({ displayName: 'Main hall', location: 'Ground floor', ...overrides })
+        .set(await admin())
+        .send({
+          displayName: 'Main hall',
+          location: 'Ground floor',
+          ownerAccountId: customer.account.id,
+          ...overrides,
+        })
         .expect(201);
+      const tableId = adminTableSchema.parse(response.body).id;
+      await this.pair(tableId);
 
-      return adminTableSchema.parse(response.body).id;
+      return tableId;
+    },
+
+    /** Make the customer the owner of an existing (fixture) table. */
+    async claim(tableId: string): Promise<void> {
+      await http()
+        .patch(`/api/v1/admin/tables/${tableId}`)
+        .set(await admin())
+        .send({ ownerAccountId: customer.account.id })
+        .expect(200);
+      await this.pair(tableId);
+    },
+
+    /** Pair this session with a table it owns (the drawing condition of D9). */
+    async pair(tableId: string): Promise<void> {
+      await http().post(`/api/v1/tables/${tableId}/pairing`).expect(200);
     },
 
     start: (tableId: string, designId = 'star', clientRequestId: string = randomUUID()) =>
@@ -68,13 +98,13 @@ function client(timed: TimedApp) {
 describe('the full journey', () => {
   it('scan, browse, pick, draw, pause, resume, complete, and start again', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
 
     // An administrator registers the table. The server chooses its id.
     const tableId = await api.createTable();
     expect(tableId).toMatch(/^[a-z2-7]{16}$/);
 
-    // The visitor scans its code and the app asks for the table.
+    // The owner scans its code and the app asks for the table.
     const table = getTableResponseSchema.parse((await api.getTable(tableId).expect(200)).body);
     expect(table).toStrictEqual({
       id: tableId,
@@ -84,11 +114,19 @@ describe('the full journey', () => {
       mode: 'simulation',
       connection: 'online',
       activeJobId: null,
+      plan: 'basic',
+      voiceAssistant: false,
+      // `createTable` sends no size: the placeholder applies.
+      geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
+      features: ['catalogue', 'rake'],
+      ambienceId: null,
+      readiness: { paired: true, online: true, free: true, canStart: true },
+      access: { role: 'owner' },
     });
 
     // The app lists the four designs and the visitor picks one.
     const designs = listDesignsResponseSchema.parse(
-      (await request(current.app.getHttpServer()).get('/api/v1/designs').expect(200)).body,
+      (await api.http().get('/api/v1/designs').expect(200)).body,
     );
     expect(designs.designs).toHaveLength(4);
     const star = designs.designs.find((design) => design.id === 'star')!;
@@ -101,6 +139,7 @@ describe('the full journey', () => {
 
     expect(job).toMatchObject({
       tableId,
+      kind: 'design',
       designId: 'star',
       mode: 'simulation',
       state: 'drawing',
@@ -200,7 +239,7 @@ describe('the full journey', () => {
 
   it('reports itself ready, naming the table mode', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     await api.createTable();
 
     const ready = readyResponseSchema.parse((await api.http().get('/ready').expect(200)).body);
@@ -231,7 +270,7 @@ describe('when things go wrong', () => {
       SIMULATION_FAULT_EVERY_NTH_JOB: '1',
       SIMULATION_FAULT_AT_PROGRESS: '0.5',
     });
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
 
@@ -257,7 +296,7 @@ describe('when things go wrong', () => {
 
   it('stop ends a job where it stands, and the table can be used again', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
     await current.advance(1);
@@ -277,7 +316,7 @@ describe('when things go wrong', () => {
 
   it('stop works on a paused job', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
     await api.command(job.id, 'pause').expect(200);
@@ -287,7 +326,7 @@ describe('when things go wrong', () => {
 
   it('resume on a job that is drawing is not allowed', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
 
@@ -298,7 +337,7 @@ describe('when things go wrong', () => {
 
   it('an offline table refuses a new job with TABLE_OFFLINE, and accepts one when it is back', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
 
     current.driver.simulateConnection(tableId, 'offline');
@@ -315,7 +354,7 @@ describe('when things go wrong', () => {
 
   it('a table that goes offline mid-drawing fails the job with OFFLINE and keeps its progress', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
     await current.advance(1);
@@ -334,7 +373,7 @@ describe('when things go wrong', () => {
 
   it('a table that goes offline while paused fails the job too', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
     await api.command(job.id, 'pause').expect(200);
@@ -350,7 +389,7 @@ describe('when things go wrong', () => {
 
   it('a disabled table refuses new jobs with TABLE_DISABLED, but still shows itself and lets a running job be stopped', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const clientRequestId = randomUUID();
     const job = api.job((await api.start(tableId, 'star', clientRequestId).expect(201)).body);
@@ -358,7 +397,7 @@ describe('when things go wrong', () => {
     await api
       .http()
       .patch(`/api/v1/admin/tables/${tableId}`)
-      .set(ADMIN)
+      .set(await api.admin())
       .send({ enabled: false })
       .expect(200);
 
@@ -381,7 +420,8 @@ describe('when things go wrong', () => {
 
   it('a disabled fixture table is returned with enabled: false and refuses jobs', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
+    await api.claim('table-off');
 
     expect((await api.getTable('table-off').expect(200)).body).toMatchObject({ enabled: false });
     expect(api.errorOf((await api.start('table-off').expect(409)).body).code).toBe(
@@ -392,7 +432,7 @@ describe('when things go wrong', () => {
   describe('unknown ids, in the documented order', () => {
     it('an unknown table is TABLE_NOT_FOUND, checked before the design', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
 
       const response = await api.start('no-such-table', 'no-such-design').expect(404);
 
@@ -401,7 +441,7 @@ describe('when things go wrong', () => {
 
     it('an unknown design on a real table is DESIGN_NOT_FOUND', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
 
       expect(api.errorOf((await api.start(tableId, 'no-such-design').expect(404)).body).code).toBe(
@@ -411,7 +451,7 @@ describe('when things go wrong', () => {
 
     it('the design is checked before a repeat, a disabled table or a busy one', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
       await api.start(tableId).expect(201);
 
@@ -422,7 +462,7 @@ describe('when things go wrong', () => {
 
     it('an unknown job is JOB_NOT_FOUND, for a read and for every command', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const unknown = randomUUID();
 
       expect(api.errorOf((await api.getJob(unknown).expect(404)).body).code).toBe('JOB_NOT_FOUND');
@@ -435,7 +475,7 @@ describe('when things go wrong', () => {
 
     it('history for an unknown table is TABLE_NOT_FOUND', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
 
       expect(api.errorOf((await api.history('no-such-table').expect(404)).body).code).toBe(
         'TABLE_NOT_FOUND',
@@ -444,7 +484,7 @@ describe('when things go wrong', () => {
 
     it('history for a table with no jobs is empty, not an error', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
 
       expect((await api.history(tableId).expect(200)).body).toStrictEqual({ jobs: [] });
@@ -467,7 +507,7 @@ describe('when things go wrong', () => {
       ],
     ])('rejects %s', async (_label, body, path) => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
 
       const response = await api
@@ -482,7 +522,7 @@ describe('when things go wrong', () => {
 
     it('rejects an invalid table id and an invalid job id', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
 
       expect((await api.start('NOT_VALID').expect(400)).body).toMatchObject({
         error: { code: 'VALIDATION_FAILED' },
@@ -497,7 +537,7 @@ describe('when things go wrong', () => {
 
     it.each(['0', '101', '-1', 'abc', '1.5'])('rejects the history limit %s', async (limit) => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
 
       const response = await api.history(tableId, `?limit=${limit}`).expect(400);
@@ -507,7 +547,7 @@ describe('when things go wrong', () => {
 
     it('accepts a command with no body, an empty object, or extra keys it ignores', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
       const job = api.job((await api.start(tableId).expect(201)).body);
 
@@ -518,7 +558,7 @@ describe('when things go wrong', () => {
 
     it('rejects a command whose body is not an object', async () => {
       current = await createTimedApp();
-      const api = client(current);
+      const api = await client(current);
       const tableId = await api.createTable();
       const job = api.job((await api.start(tableId).expect(201)).body);
 
@@ -533,7 +573,7 @@ describe('when things go wrong', () => {
 
   it('when the driver refuses the job, the job exists, is failed with the driver’s code, and the table is free', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     // Something outside the jobs module has the table busy: the driver will say BUSY.
     await current.driver.startJob(tableId, {
@@ -563,7 +603,7 @@ describe('when things go wrong', () => {
 
   it('the failed job stays failed: the driver’s later events do not revive it', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     await current.driver.startJob(tableId, {
       jobId: 'someone-elses-job',
@@ -588,7 +628,7 @@ describe('when things go wrong', () => {
 describe('simultaneous requests', () => {
   it('five identical taps at once create one job: one 201, four 200s, all the same job', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const clientRequestId = randomUUID();
 
@@ -607,7 +647,7 @@ describe('simultaneous requests', () => {
 
   it('five different requests at once start one job and refuse four with TABLE_BUSY', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
 
     const responses = await Promise.all(Array.from({ length: 5 }, () => api.start(tableId)));
@@ -625,7 +665,7 @@ describe('simultaneous requests', () => {
 
   it('two tables draw at the same time, independently', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const first = await api.createTable();
     const second = await api.createTable({ displayName: 'Lobby' });
 
@@ -644,7 +684,7 @@ describe('simultaneous requests', () => {
 
   it('a stop that races a completion comes out one way or the other, never both', async () => {
     current = await createTimedApp();
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const job = api.job((await api.start(tableId).expect(201)).body);
 
@@ -664,7 +704,7 @@ describe('simultaneous requests', () => {
 describe('history is bounded', () => {
   it('keeps JOB_HISTORY_LIMIT jobs per table, and forgets the oldest with their request ids', async () => {
     current = await createTimedApp({ JOB_HISTORY_LIMIT: '2' });
-    const api = client(current);
+    const api = await client(current);
     const tableId = await api.createTable();
     const ids: string[] = [];
     const requestIds: string[] = [];
@@ -693,7 +733,8 @@ describe('a restart', () => {
   it('forgets running jobs: the old job id is JOB_NOT_FOUND, and the table is free', async () => {
     const tables = new InMemoryTableRepository(fixtureTables());
     const first = await createTimedApp({}, { repository: tables });
-    const firstApi = client(first);
+    const firstApi = await client(first);
+    await firstApi.claim('table-001');
     const clientRequestId = randomUUID();
     const job = firstApi.job(
       (await firstApi.start('table-001', 'star', clientRequestId).expect(201)).body,
@@ -702,7 +743,8 @@ describe('a restart', () => {
 
     // A new instance of the application: the tables persisted, the jobs did not.
     current = await createTimedApp({}, { repository: tables });
-    const api = client(current);
+    const api = await client(current);
+    await api.claim('table-001');
 
     expect(api.errorOf((await api.getJob(job.id).expect(404)).body).code).toBe('JOB_NOT_FOUND');
     expect(api.errorOf((await api.command(job.id, 'stop').expect(404)).body).code).toBe(

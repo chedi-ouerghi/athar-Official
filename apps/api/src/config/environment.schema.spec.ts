@@ -19,8 +19,12 @@ describe('environmentSchema', () => {
       SIMULATION_SPEED_FACTOR: 1,
       SIMULATION_FAULT_EVERY_NTH_JOB: 0,
       SIMULATION_FAULT_AT_PROGRESS: 0.6,
+      MQTT_URL: 'mqtt://localhost:1883',
       JOB_HISTORY_LIMIT: 20,
       TABLES_DATA_FILE: './data/tables.json',
+      ACCOUNTS_DATA_FILE: './data/accounts.json',
+      SESSIONS_DATA_FILE: './data/sessions.json',
+      TABLE_ACCESS_DATA_FILE: './data/table-access.json',
     });
   });
 
@@ -102,6 +106,58 @@ describe('environmentSchema', () => {
     });
   });
 
+  describe('the MQTT broker (TABLE_MODE=hardware)', () => {
+    const production = {
+      NODE_ENV: 'production',
+      PUBLIC_LINK_BASE_URL: 'https://link.example.com',
+      TABLE_MODE: 'hardware',
+      MQTT_URL: 'mqtts://broker.example.com:8883',
+      MQTT_USERNAME: 'athar-api',
+      MQTT_PASSWORD: 'secret',
+    };
+
+    it('reads the broker URL and login', () => {
+      const environment = parseEnvironment({
+        MQTT_URL: 'mqtts://broker.example.com:8883',
+        MQTT_USERNAME: 'athar-api',
+        MQTT_PASSWORD: 'secret',
+      });
+
+      expect(environment.MQTT_URL).toBe('mqtts://broker.example.com:8883');
+      expect(environment.MQTT_USERNAME).toBe('athar-api');
+      expect(environment.MQTT_PASSWORD).toBe('secret');
+    });
+
+    it.each(['localhost:1883', 'http://broker', 'mqtt://', ''])('rejects the URL %j', (value) => {
+      expect(() => parseEnvironment({ MQTT_URL: value })).toThrow(EnvironmentValidationError);
+    });
+
+    it('accepts a complete production setup', () => {
+      expect(parseEnvironment(production).TABLE_MODE).toBe('hardware');
+    });
+
+    it('in production needs TLS and a login', () => {
+      expect(() => parseEnvironment({ ...production, MQTT_URL: 'mqtt://broker:1883' })).toThrow(
+        'MQTT_URL',
+      );
+      expect(() => parseEnvironment({ ...production, MQTT_USERNAME: undefined })).toThrow(
+        'MQTT_USERNAME',
+      );
+      expect(() => parseEnvironment({ ...production, MQTT_PASSWORD: undefined })).toThrow(
+        'MQTT_PASSWORD',
+      );
+    });
+
+    it('is not demanded of the simulator, even in production', () => {
+      expect(() =>
+        parseEnvironment({
+          NODE_ENV: 'production',
+          PUBLIC_LINK_BASE_URL: 'https://link.example.com',
+        }),
+      ).not.toThrow();
+    });
+  });
+
   it('ignores variables the service does not read', () => {
     const environment = parseEnvironment({ SOME_UNRELATED_FLAG: '1' });
 
@@ -115,8 +171,12 @@ describe('environmentSchema', () => {
       'SIMULATION_SPEED_FACTOR',
       'SIMULATION_FAULT_EVERY_NTH_JOB',
       'SIMULATION_FAULT_AT_PROGRESS',
+      'MQTT_URL',
       'JOB_HISTORY_LIMIT',
       'TABLES_DATA_FILE',
+      'ACCOUNTS_DATA_FILE',
+      'SESSIONS_DATA_FILE',
+      'TABLE_ACCESS_DATA_FILE',
     ]);
     expect(environmentSchema.shape).not.toHaveProperty('SOME_UNRELATED_FLAG');
   });

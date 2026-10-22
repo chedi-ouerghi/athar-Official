@@ -131,7 +131,7 @@ equivalent abstraction is the API's `TableDriver`._
 
 **Docker / orchestration**
 
-- _Deliberately omitted._* The current setup works reliably with Node alone.
+- _Deliberately omitted._ The current setup works reliably with Node alone.
   Docker should be introduced when deployment needs reproducibility or a
   specific runtime, and the API already honours `HOST`/`PORT`/`NODE_ENV` so it
   containerises without code changes.

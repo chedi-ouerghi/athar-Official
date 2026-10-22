@@ -1,5 +1,12 @@
 # Gap analysis
 
+> **Superseded (2026-10-15).** The work list now lives in `docs/plans/athar-v1-plan.md`; §4 below no longer matches the code.
+>
+> **Current plan (2026-10-22).** This is a historical audit of 2026-10-11 and is kept as such. Since then the
+> product code, accounts, MQTT driver, admin page and Docker stacks exist. Tests now run **on site on a
+> Raspberry Pi** ([hardware/GUIDE-EQUIPE-DUBAI.md](../hardware/GUIDE-EQUIPE-DUBAI.md)), the cloud VM is paused,
+> and the Raspberry Pi agent (`apps/table-agent`) is still to be written.
+
 Audit of the repository as of 2026-10-11 (branch `master`, no commits yet, all files untracked).
 No source code was changed. Every command result below was produced by running it on
 Windows 11, Node v20.19.2, pnpm 10.12.2. Claims that come from reading code rather than running

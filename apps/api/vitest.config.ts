@@ -38,6 +38,9 @@ export default defineConfig({
     // Each spec file builds its own Nest application; running files in separate
     // processes keeps signal listeners and the HTTP server isolated.
     pool: 'forks',
+    // Signing in costs real scrypt work (decision D6); with every file running at
+    // once, an end-to-end test that signs in can pass the 5 s default.
+    testTimeout: 15_000,
     reporters: ['default'],
   },
 });

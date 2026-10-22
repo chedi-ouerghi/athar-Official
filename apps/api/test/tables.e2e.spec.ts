@@ -10,12 +10,10 @@ import {
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { InMemoryTableRepository } from '../src/tables/in-memory-table.repository.js';
-import { TEST_ADMIN_KEY, createTestApp } from './create-test-app.js';
+import { bearer, createTestApp, signIn, signInOwner } from './create-test-app.js';
 import { fixtureTables } from './table-fixtures.js';
 
 const ADMIN = '/api/v1/admin/tables';
-const bearer = (key: string) => ({ Authorization: `Bearer ${key}` });
-const admin = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
 
 /** Parse a response against the shared error envelope and return its `error`. */
 function errorOf(body: unknown) {
@@ -24,9 +22,20 @@ function errorOf(body: unknown) {
 
 describe('tables over HTTP', () => {
   let app: NestExpressApplication;
+  /** An admin's access token, and the header that carries it. */
+  let token: string;
+  let admin: { Authorization: string };
+  /** The customer who owns both fixture tables. */
+  let ownerId: string;
+  let owner: { Authorization: string };
 
   beforeAll(async () => {
     app = await createTestApp({}, { repository: new InMemoryTableRepository(fixtureTables()) });
+    token = (await signIn(app)).accessToken;
+    admin = { Authorization: `Bearer ${token}` };
+    const session = await signInOwner(app, 'table-001', 'table-off');
+    ownerId = session.account.id;
+    owner = bearer(session);
   });
 
   afterAll(async () => {
@@ -35,9 +44,9 @@ describe('tables over HTTP', () => {
 
   const http = () => request(app.getHttpServer());
 
-  describe('GET /api/v1/tables/:tableId (public)', () => {
+  describe('GET /api/v1/tables/:tableId (owner or admin)', () => {
     it('returns the Table shape, with mode and connection from the driver', async () => {
-      const response = await http().get('/api/v1/tables/table-001').expect(200);
+      const response = await http().get('/api/v1/tables/table-001').set(owner).expect(200);
 
       expect(getTableResponseSchema.parse(response.body)).toStrictEqual({
         id: 'table-001',
@@ -47,15 +56,36 @@ describe('tables over HTTP', () => {
         mode: 'simulation',
         connection: 'online',
         activeJobId: null,
+        plan: 'basic',
+        voiceAssistant: false,
+        geometry: { shape: 'rectangle', widthMm: 1200, heightMm: 800 },
+        features: ['catalogue', 'rake'],
+        ambienceId: null,
+        // Not paired yet, so it cannot start.
+        readiness: { paired: false, online: true, free: true, canStart: false },
+        access: { role: 'owner' },
       });
     });
 
-    it('needs no credentials', async () => {
-      await http().get('/api/v1/tables/table-001').expect(200);
+    it('needs a session: the QR code identifies the table, it does not authorise', async () => {
+      const response = await http().get('/api/v1/tables/table-001').expect(401);
+
+      expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
+    });
+
+    it('answers TABLE_NOT_FOUND to another customer, exactly as for an unknown table', async () => {
+      const stranger = bearer(await signIn(app, 'customer'));
+      const response = await http().get('/api/v1/tables/table-001').set(stranger).expect(404);
+
+      expect(errorOf(response.body).code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('lets an admin read any table', async () => {
+      await http().get('/api/v1/tables/table-001').set(admin).expect(200);
     });
 
     it('returns a disabled table with enabled: false', async () => {
-      const response = await http().get('/api/v1/tables/table-off').expect(200);
+      const response = await http().get('/api/v1/tables/table-off').set(owner).expect(200);
 
       expect(getTableResponseSchema.parse(response.body)).toMatchObject({
         id: 'table-off',
@@ -64,7 +94,7 @@ describe('tables over HTTP', () => {
     });
 
     it('answers TABLE_NOT_FOUND with the standard envelope for an unknown table', async () => {
-      const response = await http().get('/api/v1/tables/no-such-table').expect(404);
+      const response = await http().get('/api/v1/tables/no-such-table').set(owner).expect(404);
 
       expect(errorOf(response.body)).toMatchObject({ code: 'TABLE_NOT_FOUND' });
     });
@@ -76,16 +106,17 @@ describe('tables over HTTP', () => {
       ['an underscore', 'table_001'],
       ['a percent-encoded space', 'table%20001'],
     ])('answers VALIDATION_FAILED for an invalid id: %s', async (_label, id) => {
-      const response = await http().get(`/api/v1/tables/${id}`).expect(400);
+      const response = await http().get(`/api/v1/tables/${id}`).set(owner).expect(400);
       const error = errorOf(response.body);
 
       expect(error.code).toBe('VALIDATION_FAILED');
       expect(error.details?.[0]?.path).toBe('params.tableId');
     });
 
-    it('exposes no registration timestamps', async () => {
-      const response = await http().get('/api/v1/tables/table-001').expect(200);
+    it('exposes no registration timestamps and no owner', async () => {
+      const response = await http().get('/api/v1/tables/table-001').set(owner).expect(200);
 
+      expect(response.body).not.toHaveProperty('ownerAccountId');
       expect(response.body).not.toHaveProperty('createdAt');
       expect(response.body).not.toHaveProperty('updatedAt');
     });
@@ -100,7 +131,7 @@ describe('tables over HTTP', () => {
       ['get', `${ADMIN}/table-001/qr`],
     ];
 
-    it.each(routes)('rejects %s %s without a key', async (method, path) => {
+    it.each(routes)('rejects %s %s without a token', async (method, path) => {
       const response = await http()[method](path).expect(401);
 
       expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
@@ -108,22 +139,29 @@ describe('tables over HTTP', () => {
     });
 
     it.each([
-      ['a wrong key', 'Bearer wrong-key'],
-      ['the key without a scheme', TEST_ADMIN_KEY],
-      ['the Basic scheme', `Basic ${TEST_ADMIN_KEY}`],
-      ['Bearer with no token', 'Bearer '],
-      ['a key with a character changed', `Bearer ${TEST_ADMIN_KEY.slice(0, -1)}X`],
-      ['a key with a character added', `Bearer ${TEST_ADMIN_KEY}x`],
-      ['an empty header', ''],
+      ['a wrong token', () => 'Bearer wrong-token'],
+      ['the token without a scheme', () => token],
+      ['the Basic scheme', () => `Basic ${token}`],
+      ['Bearer with no token', () => 'Bearer '],
+      ['a token with a character changed', () => `Bearer ${token.slice(0, -1)}X`],
+      ['a token with a character added', () => `Bearer ${token}x`],
+      ['an empty header', () => ''],
     ])('rejects %s', async (_label, header) => {
-      await http().get(ADMIN).set('Authorization', header).expect(401);
+      await http().get(ADMIN).set('Authorization', header()).expect(401);
     });
 
-    it('gives the same response for a missing, malformed and wrong key', async () => {
+    it.each(routes)('refuses %s %s to a customer with FORBIDDEN', async (method, path) => {
+      const customer = await signIn(app, 'customer');
+      const response = await http()[method](path).set(bearer(customer)).expect(403);
+
+      expect(errorOf(response.body).code).toBe('FORBIDDEN');
+    });
+
+    it('gives the same response for a missing, malformed and wrong token', async () => {
       const responses = await Promise.all([
         http().get(ADMIN),
         http().get(ADMIN).set('Authorization', 'Basic abc'),
-        http().get(ADMIN).set('Authorization', 'Bearer wrong-key'),
+        http().get(ADMIN).set('Authorization', 'Bearer wrong-token'),
       ]);
       const errors = responses.map((response) => {
         const { requestId, timestamp, ...rest } = errorOf(response.body);
@@ -143,26 +181,26 @@ describe('tables over HTTP', () => {
       ).toStrictEqual(new Set(['Bearer']));
     });
 
-    it('never echoes the key it was sent', async () => {
+    it('never echoes the token it was sent', async () => {
       const response = await http().get(ADMIN).set('Authorization', 'Bearer super-secret-attempt');
 
       expect(JSON.stringify(response.body)).not.toContain('super-secret-attempt');
       expect(JSON.stringify(response.headers)).not.toContain('super-secret-attempt');
     });
 
-    it('checks the key before the body, so a stranger learns nothing about valid requests', async () => {
+    it('checks the token before the body, so a stranger learns nothing about valid requests', async () => {
       const response = await http().post(ADMIN).send({ displayName: '' }).expect(401);
 
       expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
     });
 
     it('accepts the Bearer scheme in any letter case', async () => {
-      await http().get(ADMIN).set('Authorization', `bearer ${TEST_ADMIN_KEY}`).expect(200);
+      await http().get(ADMIN).set('Authorization', `bearer ${token}`).expect(200);
     });
 
-    it('does not accept the key in the URL or the body', async () => {
-      await http().get(`${ADMIN}?key=${TEST_ADMIN_KEY}`).expect(401);
-      await http().post(ADMIN).send({ key: TEST_ADMIN_KEY }).expect(401);
+    it('does not accept the token in the URL or the body', async () => {
+      await http().get(`${ADMIN}?accessToken=${token}`).expect(401);
+      await http().post(ADMIN).send({ accessToken: token }).expect(401);
     });
   });
 
@@ -186,15 +224,16 @@ describe('tables over HTTP', () => {
       expect(Date.parse(table.createdAt)).not.toBeNaN();
     });
 
-    it('makes the new table visible on the public endpoint straight away', async () => {
+    it('makes the new table visible to its owner straight away', async () => {
       const created = await http()
         .post(ADMIN)
         .set(admin)
-        .send({ displayName: 'Cafe', location: 'Terrace' })
+        .send({ displayName: 'Cafe', location: 'Terrace', ownerAccountId: ownerId })
         .expect(201);
 
       const response = await http()
         .get(`/api/v1/tables/${(created.body as { id: string }).id}`)
+        .set(owner)
         .expect(200);
 
       expect(getTableResponseSchema.parse(response.body)).toMatchObject({
@@ -222,7 +261,7 @@ describe('tables over HTTP', () => {
         .expect(201);
 
       expect((response.body as { id: string }).id).not.toBe('my-chosen-id');
-      await http().get('/api/v1/tables/my-chosen-id').expect(404);
+      await http().get('/api/v1/tables/my-chosen-id').set(admin).expect(404);
     });
 
     it('gives each table a different id', async () => {
@@ -281,7 +320,11 @@ describe('tables over HTTP', () => {
     it('returns the stored record for one table, including timestamps', async () => {
       const response = await http().get(`${ADMIN}/table-001`).set(admin).expect(200);
 
-      expect(adminTableSchema.parse(response.body)).toStrictEqual(fixtureTables()[0]);
+      expect(adminTableSchema.parse(response.body)).toStrictEqual({
+        ...fixtureTables()[0],
+        ownerAccountId: ownerId,
+        updatedAt: expect.any(String) as string,
+      });
     });
 
     it('answers TABLE_NOT_FOUND for an unknown table', async () => {
@@ -340,11 +383,11 @@ describe('tables over HTTP', () => {
       expect(Date.parse(after.updatedAt)).toBeGreaterThan(Date.parse(before.createdAt));
     });
 
-    it('switches a table off, and the public endpoint then shows enabled: false', async () => {
+    it('switches a table off, and the table then shows enabled: false', async () => {
       const id = await register();
 
       await http().patch(`${ADMIN}/${id}`).set(admin).send({ enabled: false }).expect(200);
-      const response = await http().get(`/api/v1/tables/${id}`).expect(200);
+      const response = await http().get(`/api/v1/tables/${id}`).set(admin).expect(200);
 
       expect((response.body as { enabled: boolean }).enabled).toBe(false);
     });
@@ -359,7 +402,7 @@ describe('tables over HTTP', () => {
         .expect(200);
 
       expect((response.body as { id: string }).id).toBe(id);
-      await http().get('/api/v1/tables/another-id').expect(404);
+      await http().get('/api/v1/tables/another-id').set(admin).expect(404);
     });
 
     it.each([
@@ -371,6 +414,51 @@ describe('tables over HTTP', () => {
       const response = await http().patch(`${ADMIN}/table-001`).set(admin).send(body).expect(400);
 
       expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
+    });
+
+    it('assigns an owner, a plan and the voice assistant, and removes the owner with null', async () => {
+      const id = await register();
+
+      const assigned = await http()
+        .patch(`${ADMIN}/${id}`)
+        .set(admin)
+        .send({ ownerAccountId: ownerId, plan: 'personalized', voiceAssistant: true })
+        .expect(200);
+      expect(adminTableSchema.parse(assigned.body)).toMatchObject({
+        ownerAccountId: ownerId,
+        plan: 'personalized',
+        voiceAssistant: true,
+      });
+      await http().get(`/api/v1/tables/${id}`).set(owner).expect(200);
+
+      await http().patch(`${ADMIN}/${id}`).set(admin).send({ ownerAccountId: null }).expect(200);
+      await http().get(`/api/v1/tables/${id}`).set(owner).expect(404);
+    });
+
+    it('refuses an owner that is not an existing, enabled customer with VALIDATION_FAILED', async () => {
+      const id = await register();
+      const adminId = (await signIn(app)).account.id;
+      const disabled = await signIn(app, 'customer');
+      await http()
+        .post(`/api/v1/admin/customers/${disabled.account.id}/disable`)
+        .set(admin)
+        .expect(200);
+
+      for (const ownerAccountId of ['no-such-account', adminId, disabled.account.id]) {
+        const patched = await http()
+          .patch(`${ADMIN}/${id}`)
+          .set(admin)
+          .send({ ownerAccountId })
+          .expect(400);
+        expect(errorOf(patched.body).code).toBe('VALIDATION_FAILED');
+
+        const created = await http()
+          .post(ADMIN)
+          .set(admin)
+          .send({ displayName: 'x', location: 'y', ownerAccountId })
+          .expect(400);
+        expect(errorOf(created.body).code).toBe('VALIDATION_FAILED');
+      }
     });
 
     it('answers TABLE_NOT_FOUND for an unknown table', async () => {
@@ -408,9 +496,11 @@ describe('tables over HTTP', () => {
 
 describe('the QR link with an origin configured', () => {
   let app: NestExpressApplication;
+  let admin: { Authorization: string };
 
   beforeAll(async () => {
     app = await createTestApp({ PUBLIC_LINK_BASE_URL: 'https://app.athar.example/' });
+    admin = bearer(await signIn(app));
   });
 
   afterAll(async () => {
@@ -420,7 +510,7 @@ describe('the QR link with an origin configured', () => {
   it('is <origin>/t/<tableId>, with the trailing slash of the setting normalised away', async () => {
     const response = await request(app.getHttpServer())
       .get(`${ADMIN}/table-001/qr`)
-      .set(bearer(TEST_ADMIN_KEY))
+      .set(admin)
       .expect(200);
 
     expect(tableQrResponseSchema.parse(response.body)).toStrictEqual({
@@ -430,38 +520,10 @@ describe('the QR link with an origin configured', () => {
   });
 
   it('holds only the public id: no query, fragment, token or signature', async () => {
-    const response = await request(app.getHttpServer())
-      .get(`${ADMIN}/table-001/qr`)
-      .set(bearer(TEST_ADMIN_KEY));
+    const response = await request(app.getHttpServer()).get(`${ADMIN}/table-001/qr`).set(admin);
     const { link } = response.body as { link: string };
 
     expect(link).not.toMatch(/[?#]/);
     expect(Object.keys(response.body as object).sort()).toStrictEqual(['link', 'tableId']);
-  });
-});
-
-describe('a server with no admin key configured', () => {
-  let app: NestExpressApplication;
-
-  beforeAll(async () => {
-    app = await createTestApp({ ADMIN_API_KEY: undefined });
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  it('fails closed: every admin request is refused, whatever it sends', async () => {
-    for (const header of [undefined, 'Bearer ', 'Bearer undefined', `Bearer ${TEST_ADMIN_KEY}`]) {
-      const call = request(app.getHttpServer()).get(ADMIN);
-      const response = await (header === undefined ? call : call.set('Authorization', header));
-
-      expect(response.status).toBe(401);
-      expect(errorOf(response.body).code).toBe('UNAUTHORIZED');
-    }
-  });
-
-  it('still serves the public endpoint', async () => {
-    await request(app.getHttpServer()).get('/api/v1/tables/table-001').expect(200);
   });
 });

@@ -4,6 +4,7 @@ import type { InsertResult, JobRepository } from './job-repository.js';
 interface StoredJob {
   job: DrawingJob;
   readonly clientRequestId: string;
+  readonly fingerprint: string;
 }
 
 /** A key that cannot collide: neither part can contain a NUL. */
@@ -37,7 +38,11 @@ export class InMemoryJobRepository implements JobRepository {
    * them, so two requests cannot both pass. Keep it that way: do not add an
    * `await` between reading `byRequest` or the active job and storing the job.
    */
-  insertIfNoActive(job: DrawingJob, clientRequestId: string): Promise<InsertResult> {
+  insertIfNoActive(
+    job: DrawingJob,
+    clientRequestId: string,
+    fingerprint: string,
+  ): Promise<InsertResult> {
     const earlier = this.byRequest.get(requestKey(job.tableId, clientRequestId));
     const repeated = earlier === undefined ? undefined : this.jobs.get(earlier);
 
@@ -51,7 +56,7 @@ export class InMemoryJobRepository implements JobRepository {
       return Promise.resolve({ kind: 'busy', activeJobId: active.job.id });
     }
 
-    this.jobs.set(job.id, { job: { ...job }, clientRequestId });
+    this.jobs.set(job.id, { job: { ...job }, clientRequestId, fingerprint });
     this.byTable.set(job.tableId, [...(this.byTable.get(job.tableId) ?? []), job.id]);
     this.byRequest.set(requestKey(job.tableId, clientRequestId), job.id);
     this.evictOldFinished(job.tableId);
@@ -64,6 +69,10 @@ export class InMemoryJobRepository implements JobRepository {
     const stored = id === undefined ? undefined : this.jobs.get(id);
 
     return Promise.resolve(stored === undefined ? undefined : { ...stored.job });
+  }
+
+  fingerprintOf(jobId: string): Promise<string | undefined> {
+    return Promise.resolve(this.jobs.get(jobId)?.fingerprint);
   }
 
   findActive(tableId: string): Promise<DrawingJob | undefined> {

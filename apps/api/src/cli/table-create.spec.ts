@@ -22,7 +22,17 @@ describe('parseTableCreateArguments', () => {
   it('reads the name and location, enabled by default', () => {
     expect(
       parseTableCreateArguments(['--name', 'Main hall', '--location', 'Ground floor']),
-    ).toStrictEqual({ displayName: 'Main hall', location: 'Ground floor', enabled: true });
+    ).toStrictEqual({
+      displayName: 'Main hall',
+      location: 'Ground floor',
+      enabled: true,
+      // The command registers an unowned basic table; the admin endpoint assigns the order.
+      ownerAccountId: null,
+      plan: 'basic',
+      voiceAssistant: false,
+      // Until the command takes a size, the admin sets the real one afterwards.
+      geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
+    });
   });
 
   it('reads --disabled', () => {

@@ -34,8 +34,20 @@ const MESSAGE_BY_CODE: Readonly<Record<ApiErrorCode, ErrorMessageKey>> = {
   // The app reuses a request id only for a retry of the same design, so this
   // means the app misbehaved; nothing the visitor can act on.
   IDEMPOTENCY_CONFLICT: 'error.generic',
-  // Only admin endpoints answer this, and the app never calls them.
-  UNAUTHORIZED: 'error.generic',
+  // Sign-in, ownership and plans.
+  UNAUTHORIZED: 'error.sessionExpired',
+  INVALID_CREDENTIALS: 'error.invalidCredentials',
+  SESSION_EXPIRED: 'error.sessionExpired',
+  FORBIDDEN: 'error.notAllowed',
+  TOO_MANY_REQUESTS: 'error.tooManyAttempts',
+  ACTIVATION_INVALID: 'error.activationInvalid',
+  ACCOUNT_EXISTS: 'error.generic',
+  PAIRING_REQUIRED: 'error.reconnect',
+  FEATURE_NOT_IN_PLAN: 'error.lightNotIncluded',
+  // Pairing and custom designs (nothing in the app can meet `DESIGN_READ_ONLY` yet).
+  PAIRING_TOKEN_INVALID: 'error.pairingTokenInvalid',
+  TABLE_ALREADY_CLAIMED: 'error.tableAlreadyClaimed',
+  DESIGN_READ_ONLY: 'error.generic',
 };
 
 /** Failures that never reached a JSON error from the API. */

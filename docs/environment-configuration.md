@@ -34,19 +34,22 @@ every problem at once.
 | `PORT`                           | integer      | `3000`        | TCP port                                                                |
 | `LOG_LEVEL`                      | enum         | `info`        | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`            |
 | `SHUTDOWN_TIMEOUT_MS`            | integer      | `10000`       | Grace period for in-flight requests on `SIGINT`/`SIGTERM`               |
-| `TABLE_MODE`                     | enum         | `simulation`  | `simulation` or `hardware`; `hardware` refuses to start (below)         |
+| `TABLE_MODE`                     | enum         | `simulation`  | `simulation` or `hardware` (MQTT driver; below)                         |
 | `SIMULATION_SPEED_FACTOR`        | number > 0   | `1`           | Divides simulated drawing durations (`10`: a 10-minute drawing takes 1) |
 | `SIMULATION_FAULT_EVERY_NTH_JOB` | integer >= 0 | `0`           | Every Nth simulated job faults; `0` never                               |
 | `JOB_HISTORY_LIMIT`              | integer >= 1 | `20`          | Drawing jobs remembered per table (below)                               |
 | `SIMULATION_FAULT_AT_PROGRESS`   | number 0..1  | `0.6`         | Progress at which an injected fault occurs                              |
 
-### Tables, admin access and QR links
+### Data files and QR links
 
-| Variable               | Default              | Purpose                                                              |
-| ---------------------- | -------------------- | -------------------------------------------------------------------- |
-| `TABLES_DATA_FILE`     | `./data/tables.json` | JSON file that stores the registered tables                          |
-| `ADMIN_API_KEY`        | _(unset)_            | Secret for `/api/v1/admin/**`, sent as `Authorization: Bearer <key>` |
-| `PUBLIC_LINK_BASE_URL` | _(unset)_            | Origin used to build the link in each table's QR code                |
+| Variable                 | Default                    | Purpose                                                                                      |
+| ------------------------ | -------------------------- | -------------------------------------------------------------------------------------------- |
+| `TABLES_DATA_FILE`       | `./data/tables.json`       | JSON file that stores the registered tables                                                  |
+| `ACCOUNTS_DATA_FILE`     | `./data/accounts.json`     | JSON file that stores accounts (password hashes only)                                        |
+| `TABLE_ACCESS_DATA_FILE` | `./data/table-access.json` | JSON file that stores claim and share token hashes and guests. Same rules as the tables file |
+| `SESSIONS_DATA_FILE`     | `./data/sessions.json`     | JSON file that stores sessions (token hashes only)                                           |
+| `PUBLIC_LINK_BASE_URL`   | _(unset)_                  | Origin used to build the link in each table's QR code                                        |
+| `TRUST_PROXY`            | _(unset)_                  | Reverse proxies whose `X-Forwarded-For` is believed                                          |
 
 **`TABLES_DATA_FILE`.** Relative paths are resolved from the directory the API
 runs in (`apps/api` under `pnpm`). The file and its directory are created on
@@ -57,23 +60,27 @@ refuses to run while the API does. A corrupt or unknown-version file stops the A
 from starting, with a message naming the file, and is never overwritten. The file
 and `./qr-codes` are git-ignored.
 
-**`ADMIN_API_KEY`.** In **production** the API refuses to start if it is missing,
-shorter than 32 characters, or still the placeholder from `.env.example`. In
-development and test it is optional, and when unset the admin endpoints **refuse
-every request** (they fail closed). Generate one with, for example,
-`openssl rand -base64 48` or
-`node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"`.
-It is compared in constant time, accepted only in the `Authorization` header, and
-redacted from logs. It belongs to the server: never put it in the mobile app, in
-an `EXPO_PUBLIC_*` variable, or in a QR code. There is one shared key with no
-identity and no audit trail, and rotating it means restarting the API with a new
-value (see open decision 18 in [architecture.md](architecture.md)).
+**`ACCOUNTS_DATA_FILE`, `SESSIONS_DATA_FILE`.** Same rules as the tables file:
+created on first start, persistent storage, one writing process (`<file>.lock`),
+and a corrupt file stops the API. They hold only scrypt password hashes and
+SHA-256 token hashes, never a password or token, but treat them as sensitive.
+`admin:create` writes the accounts file and refuses while the API runs. The old
+shared admin key setting is gone: admins sign in with accounts. Token lifetimes
+are constants in `apps/api/src/auth/`, not settings.
 
-**`PUBLIC_LINK_BASE_URL`.** An origin such as `https://app.athar.example`: no path,
-query or credentials; a trailing slash is ignored. Required in production, where
-it must be `https`. Unset in development, QR links use `athar://t/<tableId>`,
-which opens the app but cannot be scanned by a phone's camera app. The domain is
-baked into every printed code, so choose one that will outlive the products.
+**`TRUST_PROXY`.** The sign-in rate limit keys on the client's IP. Behind a
+reverse proxy every request comes from the proxy, so set the number of proxy hops
+(`1` for one proxy such as Caddy) or a comma-separated list of proxy IPs or CIDRs
+(`10.0.0.0/8,127.0.0.1`). `true` is refused: it would let any client choose its
+own address. Unset (the default) trusts no proxy and uses the socket's address;
+setting it without a proxy in front would let clients forge their address.
+
+**`PUBLIC_LINK_BASE_URL`.** An `https` origin such as `https://app.athar.example`:
+no port, path, query or credentials, because the app refuses any other link; a
+trailing slash is ignored. Required in production. Unset in development, QR
+links use `athar://t/<tableId>`, which opens the app but cannot be scanned by a
+phone's camera app. The domain is baked into every printed code, so choose one
+that will outlive the products.
 
 **`JOB_HISTORY_LIMIT`** (default `20`, at least `1`). Drawing jobs remembered per
 table, newest first. When a table has more, its oldest _finished_ jobs are
@@ -85,16 +92,12 @@ job it knew as a normal state.
 ### Table mode
 
 `TABLE_MODE` selects the table driver. `simulation` (the default) drives a
-simulated table. `hardware` is a valid value but **the API refuses to start
-with it**, because no hardware driver exists yet:
-
-```
-TABLE_MODE=hardware is not available: no hardware table driver is installed in this build.
-Set TABLE_MODE=simulation.
-```
-
-The refusal happens while the application is being assembled, before any port
-is bound, and exits with a non-zero code. The `SIMULATION_*` variables are read
+simulated table. `hardware` drives real tables through an MQTT broker and reads
+`MQTT_URL` (default `mqtt://localhost:1883`; `mqtt://`, `mqtts://`, `ws://` or
+`wss://`), `MQTT_USERNAME` and `MQTT_PASSWORD`. The API starts even if the broker
+is down (tables read as offline until it is reachable). With `NODE_ENV=production`
+and `hardware`, `MQTT_URL` must be `mqtts://` or `wss://` and both credentials
+are required, or the process refuses to start and says which. The `SIMULATION_*` variables are read
 only by the simulator and have no effect otherwise. They exist so demos and
 manual testing can speed drawings up (`SIMULATION_SPEED_FACTOR=20`) and so the
 error path can be exercised on demand

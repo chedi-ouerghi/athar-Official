@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminCustomerSchema,
   adminTableSchema,
+  createCustomerRequestSchema,
   createTableRequestSchema,
+  customerAccessResponseSchema,
   listAdminTablesResponseSchema,
   tableQrResponseSchema,
   updateTableRequestSchema,
@@ -17,10 +20,38 @@ const stored = {
 };
 
 describe('create table request', () => {
-  it('defaults enabled to true', () => {
+  it('defaults to enabled, no owner, the basic plan, no voice assistant and the placeholder size', () => {
     const parsed = createTableRequestSchema.parse({ displayName: 'Hall', location: 'Floor 1' });
 
-    expect(parsed).toStrictEqual({ displayName: 'Hall', location: 'Floor 1', enabled: true });
+    expect(parsed).toStrictEqual({
+      displayName: 'Hall',
+      location: 'Floor 1',
+      enabled: true,
+      ownerAccountId: null,
+      plan: 'basic',
+      voiceAssistant: false,
+      geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
+    });
+  });
+
+  it('accepts an owner, a plan and the voice assistant', () => {
+    expect(
+      createTableRequestSchema.parse({
+        displayName: 'Hall',
+        location: 'Floor 1',
+        ownerAccountId: 'account-1',
+        plan: 'personalized',
+        voiceAssistant: true,
+      }),
+    ).toMatchObject({ ownerAccountId: 'account-1', plan: 'personalized', voiceAssistant: true });
+    expect(
+      createTableRequestSchema.safeParse({ displayName: 'x', location: 'x', plan: 'premium' })
+        .success,
+    ).toBe(false);
+    expect(
+      createTableRequestSchema.safeParse({ displayName: 'x', location: 'x', ownerAccountId: '' })
+        .success,
+    ).toBe(false);
   });
 
   it('keeps an explicit enabled value', () => {
@@ -69,6 +100,10 @@ describe('update table request', () => {
     expect(updateTableRequestSchema.safeParse({ displayName: 'New' }).success).toBe(true);
     expect(updateTableRequestSchema.safeParse({ location: 'New' }).success).toBe(true);
     expect(updateTableRequestSchema.safeParse({ enabled: false }).success).toBe(true);
+    expect(updateTableRequestSchema.safeParse({ ownerAccountId: 'account-1' }).success).toBe(true);
+    expect(updateTableRequestSchema.safeParse({ ownerAccountId: null }).success).toBe(true);
+    expect(updateTableRequestSchema.safeParse({ plan: 'personalized' }).success).toBe(true);
+    expect(updateTableRequestSchema.safeParse({ voiceAssistant: false }).success).toBe(true);
   });
 
   it('rejects an empty patch', () => {
@@ -96,6 +131,14 @@ describe('update table request', () => {
 describe('admin table', () => {
   it('accepts a stored table with a valid server-generated id', () => {
     expect(adminTableSchema.safeParse(stored).success).toBe(true);
+  });
+
+  it('loads a table stored before orders existed, with no owner, basic and no voice', () => {
+    expect(adminTableSchema.parse(stored)).toMatchObject({
+      ownerAccountId: null,
+      plan: 'basic',
+      voiceAssistant: false,
+    });
   });
 
   it('rejects an id that does not match the table-id schema', () => {
@@ -149,5 +192,48 @@ describe('table QR response', () => {
     });
 
     expect(Object.keys(parsed).sort()).toStrictEqual(['link', 'tableId']);
+  });
+});
+
+describe('customers', () => {
+  const customer = {
+    id: 'account-1',
+    email: 'reem@example.com',
+    displayName: 'Reem',
+    role: 'customer',
+    status: 'pending-activation',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('normalises the email of a new customer and requires a display name', () => {
+    expect(
+      createCustomerRequestSchema.parse({ email: ' Reem@Example.COM ', displayName: ' Reem ' }),
+    ).toStrictEqual({ email: 'reem@example.com', displayName: 'Reem' });
+    expect(
+      createCustomerRequestSchema.safeParse({ email: 'not-an-email', displayName: 'R' }).success,
+    ).toBe(false);
+    expect(
+      createCustomerRequestSchema.safeParse({ email: 'r@example.com', displayName: ' ' }).success,
+    ).toBe(false);
+  });
+
+  it('shows a customer with a status and never a hash', () => {
+    const parsed = adminCustomerSchema.parse({
+      ...customer,
+      passwordHash: 'x',
+      activationCodeHash: 'y',
+    });
+
+    expect(parsed).not.toHaveProperty('passwordHash');
+    expect(parsed).not.toHaveProperty('activationCodeHash');
+    expect(adminCustomerSchema.safeParse({ ...customer, status: 'frozen' }).success).toBe(false);
+  });
+
+  it('returns the activation code with the account', () => {
+    expect(
+      customerAccessResponseSchema.safeParse({ account: customer, activationCode: 'ABCDE23456' })
+        .success,
+    ).toBe(true);
+    expect(customerAccessResponseSchema.safeParse({ account: customer }).success).toBe(false);
   });
 });

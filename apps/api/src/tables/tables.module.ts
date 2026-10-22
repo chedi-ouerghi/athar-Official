@@ -1,7 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { CLOCK, systemClock, type Clock } from '../device/clock.js';
-import { AdminKeyGuard } from './admin-key.guard.js';
 import { AdminTablesController } from './admin-tables.controller.js';
+import { PairingStore } from './pairing-store.js';
 import { generateTableId } from './table-id.js';
 import { TABLE_REPOSITORY, type TableRepository } from './table-repository.js';
 import {
@@ -22,7 +22,7 @@ export interface TablesModuleOptions {
 }
 
 /**
- * Registered tables: the public table endpoint and the admin provisioning.
+ * Registered tables: the owner's table and pairing endpoints, and the admin provisioning.
  *
  * Depends on the `TABLE_DRIVER` token (global, from `DeviceModule`) and on
  * `APP_CONFIG`. It knows nothing about jobs: `ACTIVE_JOB_LOOKUP` is the seam, and
@@ -40,11 +40,11 @@ export class TablesModule {
         { provide: TABLE_REPOSITORY, useValue: options.repository },
         { provide: CLOCK, useValue: options.clock ?? systemClock },
         { provide: TABLE_ID_GENERATOR, useValue: options.generateId ?? generateTableId },
-        AdminKeyGuard,
         TableRegistry,
         TablesService,
+        PairingStore,
       ],
-      exports: [TableRegistry, TablesService, TABLE_REPOSITORY],
+      exports: [TableRegistry, TablesService, PairingStore, TABLE_REPOSITORY],
     };
   }
 }

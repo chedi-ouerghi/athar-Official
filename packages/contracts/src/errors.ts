@@ -28,8 +28,26 @@ export const apiErrorCodeSchema = z.enum([
   'TABLE_BUSY',
   'INVALID_TRANSITION',
   'IDEMPOTENCY_CONFLICT',
-  // Admin endpoints: missing or wrong admin key.
+  // Accounts and sessions.
   'UNAUTHORIZED',
+  'INVALID_CREDENTIALS',
+  'SESSION_EXPIRED',
+  'FORBIDDEN',
+  'TOO_MANY_REQUESTS',
+  'ACTIVATION_INVALID',
+  'ACCOUNT_EXISTS',
+  // Ownership and plans.
+  'PAIRING_REQUIRED',
+  'FEATURE_NOT_IN_PLAN',
+  // Claiming and sharing a table. One code covers an unknown, expired, used-up
+  // or revoked token, so a caller cannot tell which tokens exist.
+  'PAIRING_TOKEN_INVALID',
+  // A valid claim code, but issued for another customer's account. The code is not
+  // spent, so the right customer can still use it.
+  'PAIRING_WRONG_ACCOUNT',
+  'TABLE_ALREADY_CLAIMED',
+  // Deleting a catalogue design: the catalogue is code, not data.
+  'DESIGN_READ_ONLY',
 ]);
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 

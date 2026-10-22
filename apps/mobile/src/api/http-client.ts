@@ -63,6 +63,8 @@ export interface HttpClientOptions {
   readonly fetchImpl?: FetchLike;
   /** Source of the per-request correlation id. Defaults to a random UUID. */
   readonly generateRequestId?: () => string;
+  /** Bearer token for the session, if any; asked before every call so it can be refreshed. */
+  readonly accessToken?: () => Promise<string | undefined>;
 }
 
 export interface RequestOptions {
@@ -70,6 +72,8 @@ export interface RequestOptions {
   readonly signal?: AbortSignal;
   /** Additional query parameters. */
   readonly query?: Readonly<Record<string, string | number | boolean | undefined>>;
+  /** Send no bearer token: sign-in, activation and refresh, which also run while there is no session. */
+  readonly anonymous?: boolean;
 }
 
 /** Marker used to tell a timeout apart from caller-initiated cancellation. */
@@ -184,12 +188,14 @@ export class HttpClient {
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
   private readonly generateRequestId: () => string;
+  private readonly accessToken: (() => Promise<string | undefined>) | undefined;
 
   constructor(options: HttpClientOptions) {
     this.baseUrl = options.baseUrl;
     this.timeoutMs = options.timeoutMs;
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.generateRequestId = options.generateRequestId ?? createUuid;
+    this.accessToken = options.accessToken;
   }
 
   /** The API origin this client targets. */
@@ -225,8 +231,23 @@ export class HttpClient {
     return this.send('POST', path, schema, options, body);
   }
 
+  /**
+   * Perform a PUT request with a JSON body and validate the response against
+   * `schema`.
+   *
+   * @throws ApiError for every failure mode, including a contract violation.
+   */
+  put<TSchema extends z.ZodType>(
+    path: string,
+    body: unknown,
+    schema: TSchema,
+    options: RequestOptions = {},
+  ): Promise<z.output<TSchema>> {
+    return this.send('PUT', path, schema, options, body);
+  }
+
   private async send<TSchema extends z.ZodType>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     schema: TSchema,
     options: RequestOptions,
@@ -241,18 +262,25 @@ export class HttpClient {
       [REQUEST_ID_HEADER]: requestId,
     };
 
-    if (method === 'POST') {
+    if (method !== 'GET') {
       headers['Content-Type'] = 'application/json';
     }
 
     try {
+      // No awaiting without a session provider: fetch must start in the same tick, as before.
+      const token = this.accessToken && !options.anonymous ? await this.accessToken() : undefined;
+
+      if (token !== undefined) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const response = await this.fetchImpl(url, {
         method,
         headers,
         // A command with no payload still sends `{}`: the API validates an empty
         // object, and a body-less POST with a JSON content type is rejected by
         // some parsers.
-        ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
+        ...(method !== 'GET' ? { body: JSON.stringify(body ?? {}) } : {}),
         signal: request.signal,
       });
 

@@ -1,5 +1,5 @@
 import type { DrawingJob } from '@athar/contracts';
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useApiClient } from '../../api/api-client-context';
 import { ApiError } from '../../api/http-client';
 import { isJobGone, isRetryablePollError, nextPollDelay, shouldKeepPolling } from './polling';
@@ -13,6 +13,7 @@ export type JobState =
   | { readonly status: 'error'; readonly error: unknown };
 
 type Action =
+  | { readonly type: 'reset' }
   | { readonly type: 'loaded'; readonly job: DrawingJob }
   | { readonly type: 'trouble'; readonly error: unknown }
   | { readonly type: 'not-found' }
@@ -20,6 +21,8 @@ type Action =
 
 function reduce(state: JobState, action: Action): JobState {
   switch (action.type) {
+    case 'reset':
+      return { status: 'loading' };
     case 'loaded':
       return { status: 'ready', job: action.job, trouble: false };
     case 'trouble':
@@ -70,8 +73,23 @@ export function useJob(jobId: string, { intervalMs, active }: UseJobOptions): Us
 
   // What the polling loop needs to know without being restarted by it.
   const latest = useRef<DrawingJob | undefined>(undefined);
+  const currentJobId = useRef(jobId);
+
+  // Another job: never show the previous one's state in its place.
+  const [shownJobId, setShownJobId] = useState(jobId);
+  if (shownJobId !== jobId) {
+    setShownJobId(jobId);
+    dispatch({ type: 'reset' });
+  }
 
   useEffect(() => {
+    currentJobId.current = jobId;
+
+    if (latest.current !== undefined && latest.current.id !== jobId) {
+      // Forget the previous job, or its terminal state would stop this one being fetched.
+      latest.current = undefined;
+    }
+
     if (!active || !shouldKeepPolling(latest.current)) {
       return undefined;
     }
@@ -84,8 +102,14 @@ export function useJob(jobId: string, { intervalMs, active }: UseJobOptions): Us
       try {
         const job = await client.getJob(jobId, controller.signal);
         failures = 0;
-        latest.current = job;
-        dispatch({ type: 'loaded', job });
+        const known = latest.current;
+
+        // A command answered while this poll was in flight: its job is newer, keep it.
+        // Written as "not older" so an unparsable date never blocks updates for good.
+        if (known === undefined || !(Date.parse(job.updatedAt) < Date.parse(known.updatedAt))) {
+          latest.current = job;
+          dispatch({ type: 'loaded', job });
+        }
       } catch (error) {
         if (
           controller.signal.aborted ||
@@ -130,6 +154,11 @@ export function useJob(jobId: string, { intervalMs, active }: UseJobOptions): Us
   }, [client, jobId, intervalMs, active, attempt]);
 
   const applyJob = useCallback((job: DrawingJob) => {
+    // A command sent for the previous job can answer after the id changed.
+    if (job.id !== currentJobId.current) {
+      return;
+    }
+
     latest.current = job;
     dispatch({ type: 'loaded', job });
   }, []);

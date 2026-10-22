@@ -60,9 +60,13 @@ second start being refused as busy, rejected trajectories and durations,
 ordered events, a throwing listener not breaking anything, and every status and
 event saying `mode: 'simulation'` and validating against the shared contract.
 The polar path-length maths is checked against independent numerical
-integration. The factory is checked for `TABLE_MODE=hardware` refusing with the
-documented message, and the application test checks that the refusal happens
-while the application is built and that the driver stops ticking on close.
+integration. The factory is checked for `TABLE_MODE=hardware` building the MQTT driver on a
+fake client (no broker needed), and the application test checks that it is
+bound, reads every table as offline until heard, and ends its connection on
+close. `MqttTableDriver` has its own spec with that fake client: a command
+resolving only on the `ack` of the same table, the 5-second timeout, refusals,
+no publish while a table is not known to be online, presence and the broker
+connection dropping, status routing, and malformed or foreign messages.
 
 **Tables and admin** (`src/tables/*.spec.ts`, `test/tables*.e2e.spec.ts`) — one
 repository contract suite run against both the in-memory and the JSON-file
@@ -72,15 +76,19 @@ writes (temporary file in the same directory, renamed over the target, nothing
 left behind, previous contents intact and memory in agreement when the rename
 fails, transient Windows renames retried, leftovers cleaned, concurrent changes
 serialised), and the writer lock (second writer refused, readers allowed, released
-on close, stale lock taken over). The admin guard is tested for every way of
-failing, for the single identical response they all produce, and for never echoing
-a key. Over HTTP: create (server-generated ids, ignored caller ids, validation),
-list, get, partial update, the QR link in both forms, the public endpoint (a
-disabled table returned with `enabled: false`, unknown and invalid ids), a server
-with no key failing closed, and persistence across a restart through the real
-file. Also the environment rules for `ADMIN_API_KEY` and `PUBLIC_LINK_BASE_URL`
-(including that `.env.example` itself is refused in production), log redaction of
-the key, id generation (checked against the RFC 4648 vectors), and both commands
+on close, stale lock taken over). The admin routes are tested for every way of
+failing authentication, for the single identical response they all produce, for
+never echoing a token, and for refusing a customer (`FORBIDDEN`). Over HTTP: create
+(server-generated ids, ignored caller ids, validation), list, get, partial update,
+the QR link in both forms, the public endpoint (a disabled table returned with
+`enabled: false`, unknown and invalid ids), and persistence of tables, accounts
+and sessions across a restart through the real files. Accounts and sessions
+(`src/auth`, `test/auth.e2e.spec.ts`): scrypt round trip, token hashing, refresh
+rotation and reuse revoking the session, expiry and the absolute session limit on
+a fake clock, the sign-in throttle, one answer for every sign-in failure,
+activation (single use, 72 h), and `admin:create` (never a password argument,
+respects the lock). Also the environment rules for `PUBLIC_LINK_BASE_URL`, log
+redaction of tokens, passwords and codes, id generation (checked against the RFC 4648 vectors), and both commands
 (`table:qr` writes a real SVG and a PNG of at least 1024 px; `table:create` shares
 the service and respects the lock).
 

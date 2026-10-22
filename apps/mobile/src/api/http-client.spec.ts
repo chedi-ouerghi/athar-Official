@@ -197,6 +197,21 @@ describe('HttpClient', () => {
       expect(result).toStrictEqual({ status: 'created', count: 1 });
     });
 
+    it('sends a PUT the same way', async () => {
+      const fetchImpl = vi
+        .fn<FetchLike>()
+        .mockResolvedValue(jsonResponse({ status: 'ok', count: 1 }));
+
+      const result = await client(fetchImpl).put('/things/1', { name: 'amber' }, payloadSchema);
+
+      const [url, init] = fetchImpl.mock.calls[0] ?? [];
+      expect(url).toBe('http://api.test:3000/things/1');
+      expect(init?.method).toBe('PUT');
+      expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+      expect(init?.body).toBe('{"name":"amber"}');
+      expect(result).toStrictEqual({ status: 'ok', count: 1 });
+    });
+
     it('sends an empty object when there is no payload', async () => {
       const fetchImpl = vi
         .fn<FetchLike>()

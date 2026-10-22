@@ -3,13 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tableIdSchema } from '@athar/contracts';
 import { DomainException } from '../common/http/domain.exception.js';
 import { FakeClock } from '../device/fake-clock.js';
+import type { GuestLookup } from './guest-lookup.js';
 import { InMemoryTableRepository } from './in-memory-table.repository.js';
 import { generateTableId } from './table-id.js';
 import { TableRegistry } from './table-registry.service.js';
 
 const START = '2026-01-01T00:00:00.000Z';
 
-function setup(options: { baseUrl?: string; ids?: string[] } = {}) {
+function setup(options: { baseUrl?: string; ids?: string[]; guests?: GuestLookup } = {}) {
   const clock = new FakeClock(Date.parse(START));
   const repository = new InMemoryTableRepository();
   const queue = options.ids === undefined ? undefined : [...options.ids];
@@ -18,6 +19,7 @@ function setup(options: { baseUrl?: string; ids?: string[] } = {}) {
     { publicLinkBaseUrl: options.baseUrl },
     clock,
     queue === undefined ? generateTableId : () => queue.shift() ?? 'exhausted-id-supply',
+    options.guests,
   );
 
   return { clock, repository, registry };
@@ -46,6 +48,10 @@ describe('TableRegistry', () => {
       expect(table).toStrictEqual({
         ...NEW_TABLE,
         id: table.id,
+        ownerAccountId: null,
+        plan: 'basic',
+        voiceAssistant: false,
+        geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
         createdAt: START,
         updatedAt: START,
       });
@@ -123,6 +129,10 @@ describe('TableRegistry', () => {
         displayName: 'Main hall',
         location: 'Upstairs',
         enabled: true,
+        ownerAccountId: null,
+        plan: 'basic',
+        voiceAssistant: false,
+        geometry: { shape: 'round', widthMm: 600, heightMm: 600 },
         createdAt: START,
         updatedAt: '2026-01-01T00:01:00.000Z',
       });
@@ -142,6 +152,144 @@ describe('TableRegistry', () => {
       const failure = await failureOf(registry.update('nope-nope', { enabled: false }));
 
       expect((failure as DomainException).code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('assigns an order, and removes the owner only for an explicit null', async () => {
+      const { registry } = setup({ ids: ['table-a1'] });
+      await registry.create(NEW_TABLE);
+
+      expect(
+        await registry.update('table-a1', {
+          ownerAccountId: 'customer-1',
+          plan: 'personalized',
+          voiceAssistant: true,
+        }),
+      ).toMatchObject({ ownerAccountId: 'customer-1', plan: 'personalized', voiceAssistant: true });
+      // A patch that does not mention the owner keeps it.
+      expect((await registry.update('table-a1', { enabled: false })).ownerAccountId).toBe(
+        'customer-1',
+      );
+      expect((await registry.update('table-a1', { ownerAccountId: null })).ownerAccountId).toBe(
+        null,
+      );
+    });
+  });
+
+  describe('who may use a table', () => {
+    const owner = {
+      id: 'customer-1',
+      email: 'a@x.test',
+      displayName: 'A',
+      role: 'customer',
+    } as const;
+    const other = { ...owner, id: 'customer-2' };
+    const admin = { ...owner, id: 'admin-1', role: 'admin' } as const;
+
+    async function owned() {
+      const context = setup({ ids: ['table-a1'] });
+      await context.registry.create({ ...NEW_TABLE, ownerAccountId: owner.id });
+      return context.registry;
+    }
+
+    it('lets the owner read and command it', async () => {
+      const registry = await owned();
+
+      expect((await registry.getFor('table-a1', owner)).id).toBe('table-a1');
+      expect((await registry.getFor('table-a1', owner, 'command')).id).toBe('table-a1');
+    });
+
+    it('lets an admin read it, but not command it', async () => {
+      const registry = await owned();
+
+      expect((await registry.getFor('table-a1', admin)).id).toBe('table-a1');
+      expect(
+        ((await failureOf(registry.getFor('table-a1', admin, 'command'))) as DomainException).code,
+      ).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('tells anyone else the table does not exist, as for an unknown id', async () => {
+      const registry = await owned();
+
+      for (const failure of [
+        await failureOf(registry.getFor('table-a1', other)),
+        await failureOf(registry.getFor('nope-nope', owner)),
+      ]) {
+        expect((failure as DomainException).code).toBe('TABLE_NOT_FOUND');
+      }
+    });
+
+    it('gives an unowned table to nobody but admins', async () => {
+      const { registry } = setup({ ids: ['table-a1'] });
+      await registry.create(NEW_TABLE);
+
+      expect(((await failureOf(registry.getFor('table-a1', owner))) as DomainException).code).toBe(
+        'TABLE_NOT_FOUND',
+      );
+      expect((await registry.getFor('table-a1', admin)).id).toBe('table-a1');
+    });
+
+    describe('for a guest', () => {
+      const guest = { ...owner, id: 'guest-1' };
+      const HOUR = 3_600_000;
+
+      /** `guest-1` is a guest of `table-a1` for an hour from the start. */
+      async function shared() {
+        const until = Date.parse(START) + HOUR;
+        const context = setup({
+          ids: ['table-a1', 'table-b2'],
+          guests: {
+            isGuest: (tableId, accountId, now) =>
+              tableId === 'table-a1' && accountId === 'guest-1' && now < until,
+          },
+        });
+        await context.registry.create({ ...NEW_TABLE, ownerAccountId: owner.id });
+        await context.registry.create({ ...NEW_TABLE, ownerAccountId: owner.id });
+
+        return context;
+      }
+
+      it('lets a guest read and command the table, but not manage it', async () => {
+        const { registry } = await shared();
+
+        expect((await registry.getFor('table-a1', guest)).id).toBe('table-a1');
+        expect((await registry.getFor('table-a1', guest, 'command')).id).toBe('table-a1');
+        expect(
+          ((await failureOf(registry.getFor('table-a1', guest, 'manage'))) as DomainException).code,
+        ).toBe('TABLE_NOT_FOUND');
+      });
+
+      it('lets the owner manage it, and nobody else', async () => {
+        const { registry } = await shared();
+
+        expect((await registry.getFor('table-a1', owner, 'manage')).id).toBe('table-a1');
+        for (const account of [other, admin]) {
+          expect(
+            ((await failureOf(registry.getFor('table-a1', account, 'manage'))) as DomainException)
+              .code,
+          ).toBe('TABLE_NOT_FOUND');
+        }
+      });
+
+      it('is a guest of that table only', async () => {
+        const { registry } = await shared();
+
+        expect(
+          ((await failureOf(registry.getFor('table-b2', guest))) as DomainException).code,
+        ).toBe('TABLE_NOT_FOUND');
+      });
+
+      it('is nobody again once the access has ended', async () => {
+        const { registry, clock } = await shared();
+        clock.advance(HOUR - 1);
+
+        expect((await registry.getFor('table-a1', guest)).id).toBe('table-a1');
+
+        clock.advance(1);
+
+        expect(
+          ((await failureOf(registry.getFor('table-a1', guest))) as DomainException).code,
+        ).toBe('TABLE_NOT_FOUND');
+      });
     });
   });
 

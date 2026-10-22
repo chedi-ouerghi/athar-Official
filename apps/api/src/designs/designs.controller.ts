@@ -1,18 +1,20 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import {
   designParamsSchema,
   type DesignParams,
   type GetDesignResponse,
   type ListDesignsResponse,
 } from '@athar/contracts';
+import { SessionGuard } from '../auth/session.guard.js';
 import { ZodValidationPipe } from '../common/validation/zod-validation.pipe.js';
 import { DesignsService } from './designs.service.js';
 
 /**
- * The design library, `/api/v1/designs`. Public: designs are the same for every
- * visitor and contain nothing sensitive.
+ * The design library, `/api/v1/designs`. The same for every account (no
+ * ownership), but behind a session like the rest of the app.
  */
 @Controller('designs')
+@UseGuards(SessionGuard)
 export class DesignsController {
   constructor(private readonly designs: DesignsService) {}
 

@@ -73,3 +73,15 @@ Thumbs.db
 /apps/api/data/
 /apps/api/qr-codes/
 /apps/api/design-previews/
+
+# ---------------------------------------------------------------------------
+# Local tooling and deployment secrets (never committed)
+#
+# deploy/.env holds the broker password; deploy/mosquitto/passwd holds the
+# hashed broker logins. Both are created by hand on the machine that runs the
+# stack (see deploy/README.md and hardware/GUIDE-EQUIPE-DUBAI.md).
+# ---------------------------------------------------------------------------
+.claude/settings.local.json
+.impeccable/
+deploy/.env
+deploy/mosquitto/passwd

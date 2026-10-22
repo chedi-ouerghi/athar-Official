@@ -43,6 +43,7 @@ function job(overrides: Partial<DrawingJob> = {}): DrawingJob {
   return {
     id: '4d7a5f0e-5b0b-4f0e-9d0e-0a0a0a0a0a0a',
     tableId: 'table-001',
+    kind: 'design',
     designId: 'star',
     mode: 'simulation',
     state: 'queued',
@@ -65,6 +66,7 @@ function status(overrides: Partial<DriverStatus> = {}): DriverStatus {
     jobId: job().id,
     progress: 0.25,
     errorCode: null,
+    ambienceId: null,
     observedAt: NOW,
     ...overrides,
   };

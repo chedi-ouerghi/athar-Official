@@ -1,0 +1,17 @@
+# Athar — ACL Mosquitto
+# Convention : le username MQTT d'une table == son tableId (ex: gsbdul574ds4dhvc, 16 caractères a-z0-9, généré par table-create).
+# %u est remplacé par ce username → une table ne voit QUE ses propres topics.
+
+# --- API (user athar-api) : publie les commandes, lit tout le reste
+user athar-api
+topic write athar/v1/t/+/cmd
+topic read  athar/v1/t/+/ack
+topic read  athar/v1/t/+/status
+topic read  athar/v1/t/+/presence
+
+# --- Chaque table : lit ses commandes, publie ack/status/presence
+# (s'applique à tous les autres users)
+pattern read  athar/v1/t/%u/cmd
+pattern write athar/v1/t/%u/ack
+pattern write athar/v1/t/%u/status
+pattern write athar/v1/t/%u/presence

@@ -239,6 +239,28 @@ fronds in the spirit of the craft. It is the most literal reading of the theme a
 the least like weaving; whether it evokes khoos enough, or whether a coiled circular
 mat (the `surood` the page mentions) would be better, is an artistic call for you.
 
+## The rake and the LED ambiences (not designs)
+
+**The rake** (`generators/rake.ts`) smooths the sand: a spiral from the centre out
+to rho 0.96 in 20 turns, then a straight line back to the centre (home). It is
+built and checked like a design (same trajectory rules, same nominal speed, about
+17 minutes) but is not in the catalogue and has no text or preview. The 20 turns
+are a placeholder for the ball's track width; the return line disappears if home
+moves to the rim.
+
+**The LED ambiences** (`data/ambiences.v1.ts`) are only the three the website
+names. The other three come from you; none are invented in the meantime.
+
+| Id          | English   | Arabic (needs native review) | Swatch    |
+| ----------- | --------- | ---------------------------- | --------- |
+| `gulf-blue` | Gulf blue | أزرق الخليج                  | `#1b6ca8` |
+| `amber`     | Amber     | كهرماني                      | `#ffbf00` |
+| `pearl`     | Pearl     | لؤلؤي                        | `#eae0c8` |
+
+The Arabic names are straightforward translations, not brand names: a native
+speaker should confirm them (or supply the brand's own). The swatch colours are
+first guesses for the app; the hardware maps the id to its own LED values.
+
 ## Arabic text: needs review by a native speaker
 
 **All Arabic in this draft was written by me and has not been reviewed.** Please have
@@ -278,12 +300,13 @@ vocabulary, check at least the following:
    fronds the most literal; the others read clearly. Names, counts (8 fronds, 6/12/18
    diamond teeth, 4 stars) and proportions are all parameters of the generators.
 5. **The durations**, which are placeholders until the mechanics are chosen.
-6. **The Arabic**, all of it, by a native speaker.
+6. **The Arabic**, all of it, by a native speaker, including the three ambience names.
 7. **Whether you want more than the four sources cited**, and for which designs.
 8. **Colour and presentation of the previews** in the app, which are not designed yet.
 9. **Table-wide questions** that this draft leaves as they were: the collection is
    exactly four designs for every table; whether it is the same for every table
    is [open decision 8](architecture.md#9-open-decisions).
+10. **The other three LED ambiences**: names (English and Arabic) and colours.
 
 ## Changing a design
 

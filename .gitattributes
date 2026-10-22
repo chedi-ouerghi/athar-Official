@@ -1,0 +1,2 @@
+# Prettier and .editorconfig require LF; keep it in every checkout, whatever core.autocrlf says.
+* text=auto eol=lf

@@ -4,7 +4,7 @@
  * (docs/architecture.md, "Table persistence").
  *
  * A repository stores registration data only: id, display name, location,
- * the `enabled` switch and timestamps. Live state (mode, connection, active
+ * the `enabled` switch, the order (owner, plan, voice add-on) and timestamps. Live state (mode, connection, active
  * job) is not stored; it is composed from the driver on each read.
  */
 
@@ -17,7 +17,19 @@ export type TableRecord = AdminTable;
  * Fields an update may change, plus the new `updatedAt`. A field left out is
  * left alone. The id is not here: it is immutable.
  */
-export type TablePatch = Partial<Pick<TableRecord, 'displayName' | 'location' | 'enabled'>> & {
+export type TablePatch = Partial<
+  Pick<
+    TableRecord,
+    | 'displayName'
+    | 'location'
+    | 'enabled'
+    | 'ownerAccountId'
+    | 'reservedForAccountId'
+    | 'plan'
+    | 'voiceAssistant'
+    | 'geometry'
+  >
+> & {
   readonly updatedAt: string;
 };
 
@@ -56,6 +68,16 @@ export function applyPatch(record: TableRecord, patch: TablePatch): TableRecord 
     displayName: patch.displayName ?? record.displayName,
     location: patch.location ?? record.location,
     enabled: patch.enabled ?? record.enabled,
+    // `null` is a value here (no owner), so only `undefined` means "leave alone".
+    ownerAccountId:
+      patch.ownerAccountId === undefined ? record.ownerAccountId : patch.ownerAccountId,
+    // Only written when the patch names it, so a record without the field keeps no key for it.
+    ...(patch.reservedForAccountId === undefined
+      ? {}
+      : { reservedForAccountId: patch.reservedForAccountId }),
+    plan: patch.plan ?? record.plan,
+    voiceAssistant: patch.voiceAssistant ?? record.voiceAssistant,
+    geometry: patch.geometry ?? record.geometry,
     updatedAt: patch.updatedAt,
   };
 }

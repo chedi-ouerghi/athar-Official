@@ -120,8 +120,13 @@ function inspirationProblems(design: DesignDefinition): string[] {
   return problems;
 }
 
-/** Problems with a design's trajectory, or none if it can be drawn and chained. */
-function trajectoryProblems(trajectory: Trajectory): string[] {
+/**
+ * Problems with a trajectory, or none if it can be drawn and chained: the
+ * driver's checks, plus starting and ending at home, no jumps and no segment
+ * the table's interpolation would bend. Every catalogue design, the rake and
+ * every freehand path pass through here.
+ */
+export function trajectoryProblems(trajectory: Trajectory): string[] {
   const problems = describeTrajectoryProblems(trajectory);
 
   if (problems.length > 0) {

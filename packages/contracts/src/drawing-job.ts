@@ -32,13 +32,22 @@ export const jobErrorCodeSchema = driverErrorCodeSchema;
 export type JobErrorCode = z.infer<typeof jobErrorCodeSchema>;
 
 /**
+ * What a job draws: a catalogue design, the owner's own freehand path, or the
+ * rake (a spiral that smooths the sand). Each needs its own plan feature.
+ */
+export const jobKindSchema = z.enum(['design', 'path', 'rake']);
+export type JobKind = z.infer<typeof jobKindSchema>;
+
+/**
  * A drawing job. Contains no personal data: no user, device, address or
  * free-text field.
  */
 export const drawingJobSchema = z.object({
   id: z.uuid(),
   tableId: tableIdSchema,
-  designId: designIdSchema,
+  kind: jobKindSchema,
+  /** The catalogue design drawn, or `null` for a `path` or `rake` job. */
+  designId: designIdSchema.nullable(),
   /** Copied from the driver at creation and immutable, so history is never relabelled. */
   mode: tableModeSchema,
   state: jobStateSchema,
@@ -133,16 +142,52 @@ export function nextJobState(from: JobState, trigger: JobTrigger): JobState | un
 export const jobParamsSchema = z.object({ jobId: z.uuid() });
 export type JobParams = z.infer<typeof jobParamsSchema>;
 
-/** Body of `POST /api/v1/tables/:tableId/jobs`. */
-export const startJobRequestSchema = z.object({
-  designId: designIdSchema,
-  /**
-   * Client-generated UUID that makes the request idempotent: a repeat with the
-   * same id and design returns the original job instead of creating another.
-   */
-  clientRequestId: z.uuid(),
-});
+/**
+ * Most points a freehand `path` may have. A finger stroke is simplified by the
+ * app before sending; the API densifies it again, so 1000 is plenty and keeps
+ * the body small (about 40 kB as JSON).
+ */
+export const DRAWING_PATH_MAX_POINTS = 1000;
+
+/**
+ * A freehand path in the `polar-theta-rho/v1` convention (see `polar-path.ts`):
+ * `[theta, rho]` with theta in radians and rho 0 (centre) to 1 (edge). Points
+ * may be far apart: the API joins them with straight lines, adds a lead-in from
+ * home and a return to home, and validates the result like a design trajectory.
+ */
+export const drawingPathSchema = z
+  .array(z.tuple([z.number(), z.number().min(0).max(1)]))
+  .min(2)
+  .max(DRAWING_PATH_MAX_POINTS);
+export type DrawingPath = z.infer<typeof drawingPathSchema>;
+
+/**
+ * Client-generated UUID that makes a start idempotent: a repeat with the same
+ * id and the same request returns the original job instead of creating another.
+ */
+const clientRequestIdSchema = z.uuid();
+
+/**
+ * Body of `POST /api/v1/tables/:tableId/jobs`, by `kind`. `kind` defaults to
+ * `design`, so a body without it (every v1 client before Phase 5) still parses.
+ */
+export const startJobRequestSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('design').default('design'),
+    designId: designIdSchema,
+    clientRequestId: clientRequestIdSchema,
+  }),
+  z.object({
+    kind: z.literal('path'),
+    path: drawingPathSchema,
+    clientRequestId: clientRequestIdSchema,
+  }),
+  z.object({ kind: z.literal('rake'), clientRequestId: clientRequestIdSchema }),
+]);
+/** The parsed body: `kind` is always present. */
 export type StartJobRequest = z.infer<typeof startJobRequestSchema>;
+/** What a client may send: `kind` may be left out for a design. */
+export type StartJobRequestInput = z.input<typeof startJobRequestSchema>;
 
 /**
  * Payload of `POST /api/v1/tables/:tableId/jobs`: `201` for a new job, `200`

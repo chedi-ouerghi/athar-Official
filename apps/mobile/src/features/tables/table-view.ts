@@ -47,6 +47,21 @@ export function classifyTableView(state: ResourceState<Table>): TableView {
   }
 }
 
+/**
+ * What the calling account is shown on a table, from its role and plan. Hiding is
+ * a courtesy: the API refuses the same calls to anyone not allowed to make them.
+ */
+export function capabilitiesOf(table: Table): { readonly light: boolean; readonly share: boolean } {
+  const { role } = table.access;
+
+  return {
+    // An admin may look at a table but not command it.
+    light: role !== 'admin' && table.features.includes('ledAmbiences'),
+    // Only the owner invites guests.
+    share: role === 'owner',
+  };
+}
+
 export const CONNECTION_LABEL_KEY: Readonly<Record<Table['connection'], TranslationKey>> = {
   online: 'table.connection.online',
   offline: 'table.connection.offline',

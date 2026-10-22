@@ -6,8 +6,37 @@
  * the first request.
  */
 
+import { isIP } from 'node:net';
 import { z } from 'zod';
-import { ADMIN_API_KEY_MIN_LENGTH, ADMIN_API_KEY_PLACEHOLDER } from './admin-key.js';
+
+/**
+ * Express's `trust proxy` value from `TRUST_PROXY`: a hop count (`1` behind one
+ * reverse proxy such as Caddy), or a comma-separated list of proxy IPs or CIDRs.
+ * Never `true`, which would let any client choose its own IP with
+ * `X-Forwarded-For`. `undefined` for anything else.
+ */
+export function parseTrustProxy(text: string): number | string[] | undefined {
+  const value = text.trim();
+
+  if (/^\d{1,2}$/.test(value)) {
+    return Number(value);
+  }
+
+  const entries = value.split(',').map((entry) => entry.trim());
+  const valid = entries.every((entry) => {
+    const [address = '', prefix, extra] = entry.split('/');
+    const family = isIP(address);
+    const bits = family === 4 ? 32 : 128;
+
+    return (
+      family !== 0 &&
+      extra === undefined &&
+      (prefix === undefined || (/^\d{1,3}$/.test(prefix) && Number(prefix) <= bits))
+    );
+  });
+
+  return valid ? entries : undefined;
+}
 
 /** Pino log levels, ordered from most to least verbose. */
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
@@ -45,9 +74,9 @@ export const environmentSchema = z
     SHUTDOWN_TIMEOUT_MS: INTEGER.min(0).default(10_000),
 
     /**
-     * Which table driver the API talks to. `hardware` is accepted by the schema
-     * but refused at startup until a hardware driver exists (see
-     * `createTableDriver`), so the refusal has one clear, dedicated message.
+     * Which table driver the API talks to: the simulator, or `hardware`, which
+     * reaches the real tables through the MQTT broker below (see
+     * `createTableDriver`).
      */
     TABLE_MODE: z.enum(['simulation', 'hardware']).default('simulation'),
 
@@ -60,6 +89,19 @@ export const environmentSchema = z
     /** Progress (0..1) at which an injected simulated fault occurs. */
     SIMULATION_FAULT_AT_PROGRESS: z.coerce.number().min(0).max(1).default(0.6),
 
+    /**
+     * `TABLE_MODE=hardware` only. The broker the tables connect to. Use `mqtts://`
+     * (TLS) outside development: the broker login travels over this connection.
+     */
+    MQTT_URL: z
+      .string()
+      .regex(/^(mqtt|mqtts|ws|wss):\/\/\S+$/, 'must be an mqtt://, mqtts://, ws:// or wss:// URL')
+      .default('mqtt://localhost:1883'),
+
+    /** `TABLE_MODE=hardware` only. The API's own broker login. */
+    MQTT_USERNAME: optionalText,
+    MQTT_PASSWORD: optionalText,
+
     /** Drawing jobs kept per table, newest first. Older finished jobs are forgotten. */
     JOB_HISTORY_LIMIT: INTEGER.min(1).default(20),
 
@@ -70,48 +112,75 @@ export const environmentSchema = z
      */
     TABLES_DATA_FILE: z.string().min(1).default('./data/tables.json'),
 
+    /** JSON file that stores accounts (password hashes, never passwords). Same rules as tables. */
+    ACCOUNTS_DATA_FILE: z.string().min(1).default('./data/accounts.json'),
+
+    /** JSON file that stores sessions (token hashes, never tokens). Same rules as tables. */
+    SESSIONS_DATA_FILE: z.string().min(1).default('./data/sessions.json'),
+
     /**
-     * Secret that protects `/api/v1/admin/**`, sent as `Authorization: Bearer`.
-     *
-     * Optional in development and test, where an unset key makes the admin
-     * endpoints refuse everyone. Required in production; see the checks below.
-     * Never logged: error messages here describe the key, never quote it.
+     * JSON file that stores claim and share tokens (hashes, never tokens) and the
+     * guests who redeemed one. Same rules as tables.
      */
-    ADMIN_API_KEY: optionalText,
+    TABLE_ACCESS_DATA_FILE: z.string().min(1).default('./data/table-access.json'),
 
     /**
      * Origin used to build the link inside a table's QR code:
-     * `<origin>/t/<tableId>`. Required in production and must be `https` there.
-     * Unset in development, where links use the `athar://` scheme.
+     * `<origin>/t/<tableId>`. Required in production. Always `https` with no port
+     * and no credentials, because the app accepts only such links: a QR code it
+     * would refuse is worse than none. Unset in development, where links use the
+     * `athar://` scheme.
      */
     PUBLIC_LINK_BASE_URL: optionalText.transform((value) => value?.trim().replace(/\/+$/, '')),
+
+    /**
+     * Which reverse proxies to believe about the client's IP (`X-Forwarded-For`),
+     * which the sign-in throttle keys on. Unset: trust none, use the socket's
+     * address. See {@link parseTrustProxy}.
+     */
+    TRUST_PROXY: optionalText,
+
+    /**
+     * Web origins allowed to call the API from a browser, comma-separated
+     * (`http://localhost:8081`). The native app needs none. Unset: any
+     * `localhost` origin in development, none in production.
+     */
+    CORS_ORIGINS: optionalText,
   })
   .superRefine((environment, context) => {
     const production = environment.NODE_ENV === 'production';
-    const key = environment.ADMIN_API_KEY;
 
-    if (production) {
-      if (key === undefined) {
+    if (production && environment.TABLE_MODE === 'hardware') {
+      if (!/^(mqtts|wss):\/\//.test(environment.MQTT_URL)) {
         context.addIssue({
           code: 'custom',
-          path: ['ADMIN_API_KEY'],
-          message: 'is required when NODE_ENV=production',
+          path: ['MQTT_URL'],
+          message: 'must use mqtts:// or wss:// when NODE_ENV=production and TABLE_MODE=hardware',
         });
-      } else if (key.length < ADMIN_API_KEY_MIN_LENGTH) {
-        context.addIssue({
-          code: 'custom',
-          path: ['ADMIN_API_KEY'],
-          message: `must be at least ${ADMIN_API_KEY_MIN_LENGTH} characters when NODE_ENV=production`,
-        });
-      } else if (key === ADMIN_API_KEY_PLACEHOLDER) {
-        context.addIssue({
-          code: 'custom',
-          path: ['ADMIN_API_KEY'],
-          message: 'is still the placeholder from .env.example; set a real random secret',
-        });
+      }
+
+      for (const name of ['MQTT_USERNAME', 'MQTT_PASSWORD'] as const) {
+        if (environment[name] === undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: [name],
+            message: 'is required when NODE_ENV=production and TABLE_MODE=hardware',
+          });
+        }
       }
     }
 
+    if (
+      environment.TRUST_PROXY !== undefined &&
+      parseTrustProxy(environment.TRUST_PROXY) === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['TRUST_PROXY'],
+        message:
+          'must be a hop count such as 1, or a comma-separated list of proxy IPs or CIDRs (never true)',
+      });
+    }
     const base = environment.PUBLIC_LINK_BASE_URL;
 
     if (base === undefined) {
@@ -132,28 +201,25 @@ export const environmentSchema = z
       url = undefined;
     }
 
-    if (url === undefined || (url.protocol !== 'https:' && url.protocol !== 'http:')) {
+    if (url === undefined || url.protocol !== 'https:') {
       context.addIssue({
         code: 'custom',
         path: ['PUBLIC_LINK_BASE_URL'],
-        message: 'must be an absolute http(s) origin such as https://app.athar.example',
+        message: 'must be an absolute https origin such as https://app.athar.example',
       });
     } else if (
       url.pathname !== '/' ||
-      url.search !== '' ||
-      url.hash !== '' ||
-      url.username !== ''
+      // A dangling `?` or `#` leaves `search` and `hash` empty, so look at the text.
+      /[?#]/.test(base) ||
+      url.username !== '' ||
+      url.password !== '' ||
+      // Any explicit port, even :443, which `URL` would hide.
+      /:\d*$/.test(base)
     ) {
       context.addIssue({
         code: 'custom',
         path: ['PUBLIC_LINK_BASE_URL'],
-        message: 'must be an origin only, with no path, query, fragment or credentials',
-      });
-    } else if (production && url.protocol !== 'https:') {
-      context.addIssue({
-        code: 'custom',
-        path: ['PUBLIC_LINK_BASE_URL'],
-        message: 'must use https when NODE_ENV=production',
+        message: 'must be an origin only, with no port, path, query, fragment or credentials',
       });
     }
   });

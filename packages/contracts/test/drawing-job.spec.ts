@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DRAWING_PATH_MAX_POINTS,
   JOB_ACTIVE_STATES,
   JOB_TERMINAL_STATES,
   JOB_TRANSITIONS,
@@ -8,6 +9,10 @@ import {
   jobStateSchema,
   jobTriggerSchema,
   nextJobState,
+  ambienceSchema,
+  drawingPathSchema,
+  setAmbienceRequestSchema,
+  startJobRequestSchema,
   type JobState,
   type JobTrigger,
 } from '../src/index.js';
@@ -85,5 +90,73 @@ describe('job state machine', () => {
     expect(nextJobState('drawing', 'resume')).toBeUndefined();
     expect(nextJobState('paused', 'driver-completed')).toBeUndefined();
     expect(nextJobState('completed', 'stop')).toBeUndefined();
+  });
+});
+
+describe('start job request', () => {
+  const clientRequestId = '6f1c2b0e-1d2a-4c3b-9f8e-7a6b5c4d3e2f';
+
+  it('defaults kind to design, so a body without it still parses', () => {
+    expect(startJobRequestSchema.parse({ designId: 'star', clientRequestId })).toStrictEqual({
+      kind: 'design',
+      designId: 'star',
+      clientRequestId,
+    });
+  });
+
+  it('accepts a path and a rake', () => {
+    const path = [
+      [0, 0.2],
+      [1, 0.5],
+    ];
+
+    expect(startJobRequestSchema.safeParse({ kind: 'path', path, clientRequestId }).success).toBe(
+      true,
+    );
+    expect(startJobRequestSchema.safeParse({ kind: 'rake', clientRequestId }).success).toBe(true);
+  });
+
+  it.each([
+    ['an unknown kind', { kind: 'laser', clientRequestId }],
+    ['a path with one point', { kind: 'path', path: [[0, 0]], clientRequestId }],
+    [
+      'a path off the table',
+      {
+        kind: 'path',
+        path: [
+          [0, 0],
+          [1, 1.2],
+        ],
+        clientRequestId,
+      },
+    ],
+    [
+      'a path over the point limit',
+      {
+        kind: 'path',
+        path: Array.from({ length: DRAWING_PATH_MAX_POINTS + 1 }, (_, i) => [i / 100, 0.5]),
+        clientRequestId,
+      },
+    ],
+    ['a path without its path', { kind: 'path', clientRequestId }],
+    ['a rake without a request id', { kind: 'rake' }],
+  ])('rejects %s', (_label, body) => {
+    expect(startJobRequestSchema.safeParse(body).success).toBe(false);
+  });
+
+  it('accepts a path at the point limit', () => {
+    const path = Array.from({ length: DRAWING_PATH_MAX_POINTS }, (_, i) => [i / 100, 0.5]);
+
+    expect(drawingPathSchema.safeParse(path).success).toBe(true);
+  });
+});
+
+describe('ambience', () => {
+  it('accepts a named colour and rejects a malformed one', () => {
+    const amber = { id: 'amber', name: { en: 'Amber', ar: 'كهرماني' }, color: '#ffbf00' };
+
+    expect(ambienceSchema.safeParse(amber).success).toBe(true);
+    expect(ambienceSchema.safeParse({ ...amber, color: 'orange' }).success).toBe(false);
+    expect(setAmbienceRequestSchema.safeParse({ ambienceId: 'Amber!' }).success).toBe(false);
   });
 });

@@ -29,9 +29,9 @@ const READY_BODY = {
   checks: [{ name: 'configuration', status: 'ok' }],
 };
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { 'content-type': 'application/json' },
   });
 }
@@ -72,6 +72,12 @@ const TABLE = {
   mode: 'simulation',
   connection: 'online',
   activeJobId: null,
+  plan: 'basic',
+  voiceAssistant: false,
+  features: ['catalogue', 'rake'],
+  ambienceId: null,
+  readiness: { paired: true, online: true, free: true, canStart: true },
+  access: { role: 'owner' },
 };
 
 const DESIGN_SUMMARY = {
@@ -90,6 +96,7 @@ const DESIGN_SUMMARY = {
 const JOB = {
   id: JOB_ID,
   tableId: TABLE_ID,
+  kind: 'design',
   designId: 'dunes',
   mode: 'simulation',
   state: 'drawing',
@@ -152,8 +159,52 @@ describe('AtharApiClient: tables, designs and jobs', () => {
 
     expect(url()).toBe(`${base}/tables/${TABLE_ID}/jobs`);
     expect(init()?.method).toBe('POST');
-    expect(JSON.parse(String(init()?.body))).toStrictEqual({ designId: 'dunes', clientRequestId });
+    // The contract fills in the default kind before sending.
+    expect(JSON.parse(String(init()?.body))).toStrictEqual({
+      kind: 'design',
+      designId: 'dunes',
+      clientRequestId,
+    });
     expect(job.state).toBe('queued');
+  });
+
+  it('starts a freehand path or the rake', async () => {
+    const clientRequestId = '0b8f5f46-3a4d-4c8e-8d3b-6f1d2a9c7e10';
+    const path = [
+      [0, 0.2],
+      [1, 0.5],
+    ] as [number, number][];
+
+    const pen = clientWith({ ...JOB, kind: 'path', designId: null });
+    await pen.client.startJob(TABLE_ID, { kind: 'path', path, clientRequestId });
+    expect(JSON.parse(String(pen.init()?.body))).toStrictEqual({
+      kind: 'path',
+      path,
+      clientRequestId,
+    });
+
+    const rake = clientWith({ ...JOB, kind: 'rake', designId: null });
+    const job = await rake.client.startJob(TABLE_ID, { kind: 'rake', clientRequestId });
+    expect(job.designId).toBeNull();
+  });
+
+  it('lists the ambiences', async () => {
+    const amber = { id: 'amber', name: { en: 'Amber', ar: 'كهرماني' }, color: '#ffbf00' };
+    const { client, url } = clientWith({ ambiences: [amber] });
+
+    await expect(client.listAmbiences()).resolves.toStrictEqual({ ambiences: [amber] });
+    expect(url()).toBe(`${base}/ambiences`);
+  });
+
+  it('sets the ambience with a PUT and returns the table', async () => {
+    const { client, url, init } = clientWith({ ...TABLE, ambienceId: 'amber' });
+
+    const table = await client.setAmbience(TABLE_ID, 'amber');
+
+    expect(url()).toBe(`${base}/tables/${TABLE_ID}/ambience`);
+    expect(init()?.method).toBe('PUT');
+    expect(JSON.parse(String(init()?.body))).toStrictEqual({ ambienceId: 'amber' });
+    expect(table.ambienceId).toBe('amber');
   });
 
   it('refuses to send a start request that breaks the contract', () => {
@@ -250,5 +301,91 @@ describe('probeBackend', () => {
     const result = await probeBackend(new AtharApiClient(environment, { fetchImpl }));
 
     expect(result.state).toBe('unreachable');
+  });
+});
+
+describe('AtharApiClient: pairing, sharing and light', () => {
+  const base = 'http://10.0.2.2:3000/api/v1';
+  const TOKEN = 'A'.repeat(43);
+
+  it('pairs a table with a QR token', async () => {
+    const { client, url, init } = clientWith({ tableId: TABLE_ID, role: 'owner', expiresAt: null });
+
+    await expect(client.pairTable({ tableId: TABLE_ID, token: TOKEN })).resolves.toMatchObject({
+      role: 'owner',
+    });
+    expect(url()).toBe(`${base}/tables/pair`);
+    expect(init()?.body).toBe(JSON.stringify({ tableId: TABLE_ID, token: TOKEN }));
+  });
+
+  it('creates a share with the contract defaults', async () => {
+    const { client, url, init } = clientWith({
+      link: 'https://app.athar.example/pair?tableId=x&token=y',
+      deepLink: 'athar://pair?tableId=x&token=y',
+      expiresAt: NOW,
+      shareId: JOB_ID,
+      maxUses: 1,
+    });
+
+    await client.createShare(TABLE_ID);
+
+    expect(url()).toBe(`${base}/tables/${TABLE_ID}/shares`);
+    expect(init()?.body).toBe(JSON.stringify({ expiresInHours: 24, maxUses: 1 }));
+  });
+
+  it('sets a colour, normalising it and filling the brightness', async () => {
+    const { client, url, init } = clientWith(TABLE);
+
+    await client.setLight(TABLE_ID, { mode: 'color', color: '#FF8800' });
+
+    expect(url()).toBe(`${base}/tables/${TABLE_ID}/light`);
+    expect(init()?.method).toBe('PUT');
+    expect(init()?.body).toBe(JSON.stringify({ mode: 'color', color: '#ff8800', brightness: 100 }));
+  });
+
+  it('refuses a malformed colour before sending anything', async () => {
+    const { client, call } = clientWith(TABLE);
+
+    await expect(client.setLight(TABLE_ID, { mode: 'color', color: 'red' })).rejects.toThrow();
+    expect(call()).toBeUndefined();
+  });
+
+  it('reopens a lapsed pairing once and retries the light', async () => {
+    const fetchImpl = vi
+      .fn<FetchLike>()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: 'PAIRING_REQUIRED', message: 'x', requestId: 'r', timestamp: NOW } },
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ tableId: TABLE_ID, expiresAt: NOW }))
+      .mockResolvedValueOnce(jsonResponse(TABLE));
+    const client = new AtharApiClient(environment, { fetchImpl });
+
+    await client.setLight(TABLE_ID, { mode: 'on' });
+
+    expect(fetchImpl.mock.calls.map(([url]) => url.replace(base, ''))).toStrictEqual([
+      `/tables/${TABLE_ID}/light`,
+      `/tables/${TABLE_ID}/pairing`,
+      `/tables/${TABLE_ID}/light`,
+    ]);
+  });
+
+  it('sends the bearer token, except on sign-in', async () => {
+    const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(TABLE));
+    const client = new AtharApiClient(environment, {
+      fetchImpl,
+      accessToken: () => Promise.resolve('tok'),
+    });
+
+    await client.getTable(TABLE_ID);
+    await client.login({ email: 'a@athar.test', password: 'x' }).catch(() => undefined);
+
+    const auth = (call: number) =>
+      (fetchImpl.mock.calls[call]?.[1]?.headers as Record<string, string>).Authorization;
+
+    expect(auth(0)).toBe('Bearer tok');
+    expect(auth(1)).toBeUndefined();
   });
 });

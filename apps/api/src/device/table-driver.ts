@@ -3,9 +3,9 @@
  *
  * The interface is expressed in domain terms. It names no serial port, broker,
  * controller firmware, G-code dialect or transport, so it cannot only be
- * implemented for one of them. `SimulatedTableDriver` implements it now; a
- * future `HardwareTableDriver` will implement the same interface, and nothing
- * above the driver changes when it arrives.
+ * implemented for one of them. `SimulatedTableDriver` implements it for
+ * development and `MqttTableDriver` for real tables; nothing above the driver
+ * changes with the mode.
  *
  * The command path is: phone -> backend (over the internet) -> table
  * controller. This interface is the backend's side of the last arrow, and the
@@ -19,6 +19,8 @@ import type {
   DriverErrorCode,
   DriverPhase,
   DriverStatus,
+  Light,
+  TableGeometry,
   TableMode,
 } from '@athar/contracts';
 import type { Trajectory } from './trajectory.js';
@@ -74,6 +76,11 @@ export interface DriverStartRequest {
   readonly jobId: string;
   readonly trajectory: Trajectory;
   /**
+   * The table's shape and size, for a hardware driver to scale the normalised
+   * trajectory to it. The simulator ignores it.
+   */
+  readonly geometry?: TableGeometry;
+  /**
    * How long the drawing is expected to take. The simulator paces itself with
    * it; a hardware driver ignores it, because a real table takes as long as it
    * takes. Optional so that the request describes only what the table needs.
@@ -94,6 +101,19 @@ export interface TableDriver {
   resume(tableId: string, jobId: string): Promise<void>;
   /** Aborts the job. Whatever has been drawn stays drawn; it is not undone. */
   stop(tableId: string, jobId: string): Promise<void>;
+
+  /**
+   * Show an LED ambience. Independent of drawing: it may change while a job runs.
+   * The id is one the API has checked; the driver maps it to its own colours.
+   * Rejects with `DriverError` (`OFFLINE`, `FAULT`) when the table cannot take it.
+   */
+  setAmbience(tableId: string, ambienceId: string): Promise<void>;
+
+  /**
+   * Set the light: off, on, any colour at a brightness, or a named ambience.
+   * Same rules as {@link setAmbience}, which is `setLight` with a `preset`.
+   */
+  setLight(tableId: string, light: Light): Promise<void>;
 
   /**
    * Receive every status change and progress update for one table, in order.

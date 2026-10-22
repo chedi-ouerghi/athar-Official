@@ -16,14 +16,15 @@ import { useQrScan } from './useQrScan';
 export interface ScanScreenProps {
   readonly allowedHosts: readonly string[];
   readonly onTable: (tableId: string) => void;
+  readonly onPairing: (link: { readonly tableId: string; readonly token: string }) => void;
 }
 
 /** The in-app QR scanner, with the typed code as the way out when the camera is unavailable. */
-export function ScanScreen({ allowedHosts, onTable }: ScanScreenProps): ReactElement {
+export function ScanScreen({ allowedHosts, onTable, onPairing }: ScanScreenProps): ReactElement {
   const { t } = useI18n();
   const [permission, requestPermission] = useCameraPermissions();
   const [typing, setTyping] = useState(false);
-  const scan = useQrScan({ allowedHosts, onTable });
+  const scan = useQrScan({ allowedHosts, onTable, onPairing });
   const { reset } = scan;
 
   // Coming back to this screen (from the table, say) must scan again.

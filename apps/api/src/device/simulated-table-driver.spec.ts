@@ -83,6 +83,7 @@ describe('SimulatedTableDriver', () => {
         jobId: null,
         progress: 0,
         errorCode: null,
+        ambienceId: null,
         observedAt: new Date(clock.now()).toISOString(),
       });
     });
@@ -776,6 +777,64 @@ describe('SimulatedTableDriver', () => {
 
       expect(scheduler.active).toBe(0);
       await expect(driver.getStatus(TABLE)).resolves.toMatchObject({ phase: 'idle' });
+    });
+  });
+
+  describe('LED ambience', () => {
+    it('stores and announces it, without disturbing a drawing', async () => {
+      const { driver, clock, record } = setup();
+      const events = record();
+
+      await driver.startJob(TABLE, request('job-1'));
+      clock.advanceSeconds(25);
+      await driver.setAmbience(TABLE, 'amber');
+
+      expect(await driver.getStatus(TABLE)).toMatchObject({
+        phase: 'drawing',
+        progress: 0.25,
+        ambienceId: 'amber',
+      });
+      expect(events.at(-1)).toMatchObject({ ambienceId: 'amber' });
+    });
+
+    it('refuses it while the table is offline or in error', async () => {
+      const { driver } = setup();
+
+      driver.simulateConnection(TABLE, 'offline');
+      await expect(driver.setAmbience(TABLE, 'amber')).rejects.toMatchObject({ code: 'OFFLINE' });
+      driver.simulateConnection(TABLE, 'error');
+      await expect(driver.setAmbience(TABLE, 'amber')).rejects.toMatchObject({ code: 'FAULT' });
+      expect((await driver.getStatus(TABLE)).ambienceId).toBeNull();
+    });
+
+    it('a free light (off, on, a colour) reads as no named ambience; a preset as that ambience', async () => {
+      const { driver, record } = setup();
+      const events = record();
+
+      await driver.setLight(TABLE, { mode: 'preset', ambienceId: 'pearl' });
+      expect((await driver.getStatus(TABLE)).ambienceId).toBe('pearl');
+
+      for (const light of [
+        { mode: 'color', color: '#ff0000', brightness: 100 },
+        { mode: 'on' },
+        { mode: 'off' },
+      ] as const) {
+        await driver.setLight(TABLE, { mode: 'preset', ambienceId: 'pearl' });
+        await driver.setLight(TABLE, light);
+
+        expect((await driver.getStatus(TABLE)).ambienceId).toBeNull();
+        expect(events.at(-1)).toMatchObject({ ambienceId: null });
+      }
+    });
+
+    it('setLight is refused while the table is offline', async () => {
+      const { driver } = setup();
+
+      driver.simulateConnection(TABLE, 'offline');
+
+      await expect(driver.setLight(TABLE, { mode: 'off' })).rejects.toMatchObject({
+        code: 'OFFLINE',
+      });
     });
   });
 });

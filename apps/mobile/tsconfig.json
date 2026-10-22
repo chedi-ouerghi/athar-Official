@@ -7,10 +7,7 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "forceConsistentCasingInFileNames": true,
-    "customConditions": ["athar-source"],
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "customConditions": ["athar-source"]
   },
   "include": ["**/*.ts", "**/*.tsx", "vitest.config.mts", ".expo/types/**/*.ts", "expo-env.d.ts"]
 }

@@ -70,6 +70,33 @@ describe('JobScreen', () => {
     );
   });
 
+  it('shows a rake job without a preview, without fetching a design, and without an error', async () => {
+    const getDesign = jest.fn<(id: string) => Promise<never>>();
+    const client = stubClient({
+      getJob: (() => Promise.resolve(job({ kind: 'rake', designId: null }))) as never,
+      getDesign: getDesign as never,
+    });
+    renderWithApp(
+      <JobScreen
+        jobId={JOB_ID}
+        active
+        pollIntervalMs={1000}
+        onFinished={jest.fn<() => void>()}
+        onBackToTable={jest.fn<() => void>()}
+      />,
+      client,
+      'en',
+    );
+    await settle();
+
+    expect(screen.getByTestId('job-percent').props.children).toBe('25%');
+    expect(screen.queryByTestId('job-preview')).toBeNull();
+    expect(screen.queryByTestId('job-error')).toBeNull();
+    expect(screen.queryByTestId('job-command-error')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(getDesign).not.toHaveBeenCalled();
+  });
+
   it('updates as the job progresses', async () => {
     const getJob = jest
       .fn<JobCall>()

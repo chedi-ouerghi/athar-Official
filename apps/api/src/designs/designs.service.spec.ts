@@ -4,7 +4,8 @@ import {
   listDesignsResponseSchema,
 } from '@athar/contracts';
 import { describe, expect, it } from 'vitest';
-import { designCollectionV1 } from './data/designs.v1.js';
+import { designCollectionV1, estimateDurationSeconds } from './data/designs.v1.js';
+import { FREEHAND_MAX_LENGTH } from './freehand.js';
 import { loadDesignCollection } from './design-collection.js';
 import { DesignsModule } from './designs.module.js';
 import { DesignsService } from './designs.service.js';
@@ -110,5 +111,36 @@ describe('DesignsModule.forRoot', () => {
         designs: designCollectionV1.designs.slice(0, 3),
       }),
     ).toThrow('The design collection is invalid');
+  });
+
+  describe('rake and freehand', () => {
+    it('serves the rake with a duration from the nominal speed', () => {
+      const rake = service.rake();
+
+      expect(rake.trajectory.points.length).toBeGreaterThan(2);
+      expect(rake.estimatedDurationSeconds).toBe(estimateDurationSeconds(rake.trajectory));
+    });
+
+    it('joins up a freehand path and estimates its duration', () => {
+      const plan = service.freehand([
+        [0, 0.5],
+        [2, 0.5],
+      ]);
+
+      expect(plan.trajectory.points.at(-1)?.[1]).toBe(0);
+      expect(plan.estimatedDurationSeconds).toBe(estimateDurationSeconds(plan.trajectory));
+    });
+
+    it('refuses a path longer than the limit with VALIDATION_FAILED', () => {
+      // Rim to rim, 2 radii a stroke.
+      const path = Array.from(
+        { length: FREEHAND_MAX_LENGTH / 2 + 1 },
+        (_, i) => [i % 2 === 0 ? 0 : Math.PI, 1] as const,
+      );
+
+      expect(() => service.freehand(path)).toThrow(
+        expect.objectContaining({ code: 'VALIDATION_FAILED' }),
+      );
+    });
   });
 });
