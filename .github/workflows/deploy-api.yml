@@ -1,0 +1,84 @@
+# Déploie l'API UNIQUEMENT quand l'API, les contrats ou la config serveur changent.
+# Un push sur apps/mobile ou apps/admin ne déclenche rien.
+#
+# Secrets GitHub à créer (Settings > Secrets and variables > Actions) :
+#   VM_HOST      IP externe de la VM
+#   VM_USER      utilisateur SSH (ex: deploy)
+#   VM_SSH_KEY   clé privée SSH dédiée au déploiement (pas ta clé perso)
+#
+# MANUEL POUR L'INSTANT : la VM Google Cloud n'existe pas encore (les tests se font
+# sur place, sur le Raspberry Pi : voir hardware/GUIDE-EQUIPE-DUBAI.md). Sans les
+# secrets ci-dessus, un push sur master ferait échouer ce workflow à chaque fois.
+#
+# Pour le réactiver quand la VM existe (deploy/README.md) :
+#   1. créer les trois secrets ci-dessus ;
+#   2. remplacer le bloc `on:` ci-dessous par celui-ci :
+#
+#        on:
+#          push:
+#            branches: [master]
+#            paths:
+#              - 'apps/api/**'
+#              - 'packages/contracts/**'
+#              - 'packages/config/**'
+#              - 'pnpm-lock.yaml'
+#              - '.github/workflows/deploy-api.yml'
+#          workflow_dispatch:
+
+name: deploy-api
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test-build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter "@athar/api..."
+      - run: pnpm --filter "@athar/api..." test # on ne déploie jamais une API qui casse ses tests
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/chedi-ouerghi/athar-api:latest
+            ghcr.io/chedi-ouerghi/athar-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: test-build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            cd /opt/athar
+            docker compose pull api
+            docker compose up -d
+            docker image prune -f

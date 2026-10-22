@@ -1,0 +1,12 @@
+# HTTPS automatique (Let's Encrypt) pour les deux sous-domaines.
+# Prérequis DNS : api.DOMAIN et mqtt.DOMAIN -> IP externe de la VM.
+
+api.{$DOMAIN} {
+	encode gzip
+	reverse_proxy api:3000   # PORT par défaut de l'API (environment.schema.ts)
+}
+
+mqtt.{$DOMAIN} {
+	# Caddy gère l'upgrade WebSocket tout seul
+	reverse_proxy mosquitto:9001
+}

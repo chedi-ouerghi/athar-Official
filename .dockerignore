@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.expo
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+.claude
+.impeccable
+apps/mobile
+apps/admin
+docs
+hardware
+*.jpeg

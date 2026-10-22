@@ -1,0 +1,44 @@
+# Athar — mode TEST SUR PLACE : API + broker sur le Raspberry Pi, téléphone sur le même Wi-Fi.
+#
+# À utiliser TOUJOURS avec le fichier de base (qui reste celui du cloud GCP, inchangé) :
+#
+#   cd deploy
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# Ce que ce fichier change par rapport au cloud :
+#  - Caddy (HTTPS Let's Encrypt) n'est pas démarré : pas de domaine en local.
+#  - L'image de l'API est construite ici depuis le repo (l'image ghcr.io du cloud est
+#    en amd64 seulement ; le Pi 5 est en arm64).
+#  - Le port 3000 de l'API est publié sur le réseau local (le téléphone s'y connecte).
+#  - Le broker parle MQTT simple (port 1883, sans TLS) ; l'ACL est lue directement dans
+#    hardware/broker/acl (une seule source, aucune copie à faire).
+#  - NODE_ENV=development : c'est le seul mode qui accepte un broker sans TLS
+#    (environment.schema.ts exige mqtts/wss et un lien https en production).
+#    Il garde aussi les journaux lisibles (pino-pretty) et accepte l'admin servi
+#    depuis http://localhost:<port> (CORS).
+#
+# Secrets : MQTT_USERNAME et MQTT_PASSWORD viennent de deploy/.env (jamais dans Git).
+
+services:
+  caddy:
+    profiles: [cloud] # ne démarre pas sans `--profile cloud`
+
+  api:
+    image: athar-api:local
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      TABLE_MODE: hardware
+      MQTT_URL: mqtt://mosquitto:1883
+      TRUST_PROXY: '' # aucun proxy devant l'API en local (la base met 1 pour Caddy)
+
+  mosquitto:
+    volumes:
+      - ./mosquitto/mosquitto.local.conf:/mosquitto/config/mosquitto.conf:ro
+      - ../hardware/broker/acl:/mosquitto/config/acl:ro
+    ports:
+      - '127.0.0.1:1883:1883' # l'agent du Pi et mosquitto_sub tournent sur le Pi lui-même
