@@ -5,9 +5,9 @@
 #   bash hardware/pi/setup-pi.sh
 #
 # Installe : git, gh (GitHub CLI), Docker + Compose, mosquitto-clients (mosquitto_sub/pub),
-# picocom (terminal série). Ajoute l'utilisateur aux groupes `docker` et `dialout`
-# (accès à Docker et au port USB du DLC32). Relancer le script sans risque : il saute
-# ce qui est déjà installé.
+# python3-venv + unzip (scripts d'installation FluidNC). Ajoute l'utilisateur aux groupes
+# `docker` et `dialout` (accès à Docker et au port USB du DLC32). Relancer le script
+# sans risque : il saute ce qui est déjà installé.
 set -euo pipefail
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -21,7 +21,7 @@ fi
 
 echo "==> Paquets système"
 sudo apt-get update
-sudo apt-get install -y git curl ca-certificates gh mosquitto-clients picocom
+sudo apt-get install -y git curl unzip ca-certificates gh mosquitto-clients python3-venv
 
 if command -v docker >/dev/null 2>&1; then
   echo "==> Docker déjà installé : $(docker --version)"
