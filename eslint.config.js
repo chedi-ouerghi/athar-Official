@@ -35,7 +35,11 @@ module.exports = [
   ...scoped(scriptConfig, ['**/*.js', '**/*.cjs', '**/*.mjs']),
 
   // Server-side TypeScript.
-  ...scoped(nodeConfig, ['apps/api/**/*.ts', 'packages/contracts/**/*.ts']),
+  ...scoped(nodeConfig, [
+    'apps/api/**/*.ts',
+    'apps/table-agent/**/*.ts',
+    'packages/contracts/**/*.ts',
+  ]),
 
   // React Native / Expo TypeScript.
   ...scoped(reactNativeConfig, ['apps/mobile/**/*.ts', 'apps/mobile/**/*.tsx']),
