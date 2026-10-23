@@ -4,10 +4,12 @@ packages:
 
 # pnpm 10 blocks dependency lifecycle scripts by default. These packages ship
 # prebuilt platform binaries that must be linked during install:
-#   - esbuild      : Metro/Vitest bundler
-#   - @swc/core    : decorator-metadata transform used by the API test runner
-#   - unplugin-swc : same toolchain
+#   - esbuild               : Metro/Vitest bundler
+#   - @swc/core             : decorator-metadata transform used by the API test runner
+#   - unplugin-swc          : same toolchain
+#   - @serialport/bindings-cpp : native USB serial binding used by apps/table-agent
 onlyBuiltDependencies:
   - esbuild
   - '@swc/core'
   - unplugin-swc
+  - '@serialport/bindings-cpp'

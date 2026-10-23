@@ -23,32 +23,34 @@ Tout se fait sur place, sur le Raspberry Pi, avec l'API et le broker locaux
 Règle de sécurité permanente pour N3 à N5 : **une personne sur place, la main sur
 l'interrupteur d'alimentation des moteurs, pendant tout le test.**
 
-> **Dépend de l'agent.** Les cases marquées 🚫 ne peuvent pas être cochées tant que
-> `apps/table-agent` n'existe pas (voir le guide, étape F1).
+> **Agent.** `apps/table-agent` existe (voir le guide, étape F1) et couvre les tests N0 ci-dessous
+> sans matériel. Les cases encore marquées 🚫 n'ont simplement pas été rejouées sur un vrai Pi avec
+> une vraie carte au moment d'écrire ces lignes.
 
 ---
 
 ## N0 — CI : tester sans aucun matériel
 
-L'agent Pi (à créer dans `apps/table-agent`, en TypeScript pour réutiliser
-`@athar/contracts`) doit avoir deux interfaces remplaçables :
+L'agent Pi (`apps/table-agent`, en TypeScript, réutilise `@athar/contracts`) a deux interfaces
+remplaçables :
 
-- `BoardPort` : envoie le G-code et lit les réponses. En test, on utilise un
-  **FakeBoard** qui répond `ok`, simule la position et renvoie `<Idle|MPos:...>`
-  à la commande `?`. Il doit aussi savoir simuler les pannes : `error:`,
-  `ALARM:`, un câble débranché, une réponse lente.
-- `MqttPort` : réutilise l'idée de `fake-mqtt-client.ts` qui existe déjà côté API.
+- `BoardPort` (`src/board/board-port.ts`) : envoie le G-code et lit les réponses. En test, on
+  utilise `FakeBoardPort` (`src/board/fake-board-port.ts`) qui répond `ok`, simule la position et
+  renvoie `<Idle|MPos:...>` à la commande `?`. Il simule aussi les pannes : `error:`, `ALARM:`, un
+  câble débranché (`disconnect`), une réponse lente (`slow`).
+- `MqttPort` (`src/mqtt/mqtt-port.ts`) : même idée que `fake-mqtt-client.ts` côté API, avec
+  `src/mqtt/fake-mqtt-client.ts`.
 
-Ce qu'on teste en CI :
+Ce qu'on teste en CI (`pnpm --filter @athar/table-agent test`) :
 
-- [ ] conversion θ/ρ → G-code : couplage, bornes `rho_margin`, calcul de `F` pour une vitesse de bille constante
-- [ ] streaming : jamais plus de `planner_buffer_lines` lignes sans `ok`
-- [ ] chaque message MQTT valide `device-protocol.ts` (zod), dans les deux sens
-- [ ] idempotence : la même commande reçue 2 fois (QoS 1) ne lance qu'un seul dessin
-- [ ] erreurs : une `ALARM` de la carte remonte en `status` d'erreur vers l'API
-- [ ] **test de bout en bout** : API (driver MQTT) + broker Mosquitto en Docker + agent avec FakeBoard → un job va de `start` à `completed`
+- [x] conversion θ/ρ → G-code : couplage, bornes `rho_margin`, calcul de `F` pour une vitesse de bille constante (`test/polar-to-gcode.spec.ts`)
+- [x] streaming : jamais plus de `planner_buffer_lines` lignes sans `ok` (`test/gcode-stream.spec.ts`)
+- [x] chaque message MQTT valide `device-protocol.ts` (zod), dans les deux sens (`test/table-agent.e2e.spec.ts`, qui reparse chaque `ack`/`status` publié avec les schémas du protocole)
+- [x] idempotence : la même commande reçue 2 fois (QoS 1) ne lance qu'un seul dessin
+- [x] erreurs : une `ALARM` de la carte remonte en `status` d'erreur (`phase:'failed'`, `errorCode:'FAULT'`)
+- [x] **test de bout en bout** : agent avec `FakeMqttClient` + `FakeBoardPort` → un job va de `start` à `completed`
 
-👉 Une fois ce dernier test vert, il ne reste plus que la mécanique à valider.
+👉 Ce dernier test est vert ; il ne reste plus que la mécanique à valider (N1 et suivants).
 
 ## N1 — ESP32 seul (le plus rentable)
 
@@ -59,13 +61,13 @@ les impulsions. Pas de risque pour la vraie carte. Les gestes sont ceux de l'ét
 - [ ] le Pi voit la carte (`ls -l /dev/serial/by-id/`)
 - [ ] FluidNC démarre sans `[MSG:ERR:` avec notre `config.yaml` ; `$I` répond ; `?` répond `<Idle|…>`
 - [ ] un déplacement à vide (`G91`, `G1 X10 F600`) fait changer la position rapportée par `?`
-- [ ] 🚫 l'agent ouvre le port série et lit la version (`$I`)
-- [ ] 🚫 téléphone → API → broker → agent → carte : un dessin démarre
-- [ ] 🚫 la position rapportée par `?` progresse et remonte jusqu'à l'app
-- [ ] 🚫 pause / reprise / stop depuis le mobile
-- [ ] 🚫 débrancher l'USB pendant un dessin → erreur propre dans l'app ; rebrancher → reprise du contrôle
-- [ ] 🚫 couper le Wi-Fi du Pi → table « hors ligne » dans l'app (Last Will), puis retour en ligne
-- [ ] 🚫 redémarrer l'agent pendant un dessin → l'état se resynchronise
+- [ ] l'agent ouvre le port série et lit la version (`node dist/cli/selftest.js`, ou `$I` dans son rapport)
+- [ ] téléphone → API → broker → agent → carte : un dessin démarre
+- [ ] la position rapportée par `?` progresse et remonte jusqu'à l'app
+- [ ] pause / reprise / stop depuis le mobile
+- [ ] débrancher l'USB pendant un dessin → erreur propre dans l'app ; rebrancher → reprise du contrôle
+- [ ] couper le Wi-Fi du Pi → table « hors ligne » dans l'app (Last Will), puis retour en ligne
+- [ ] redémarrer l'agent pendant un dessin → l'état se resynchronise
 
 👉 Environ 90 % des bugs sortent ici, sans risque pour la mécanique.
 
@@ -75,10 +77,10 @@ DLC32 branché au Pi en USB, **alimentation des moteurs débranchée** :
 
 - [ ] le CH340 du DLC32 est visible (`ls -l /dev/serial/by-id/`)
 - [ ] FluidNC flashé sur le DLC32 + `config.yaml` envoyé, sans erreur au démarrage (guide, E2 à E4)
-- [ ] la table est « en ligne » côté API (guide, D3, avec un `online` publié à la main)
-- [ ] 🚫 `athar-agent selftest` est entièrement vert (commande à prévoir, voir plus bas)
-- [ ] 🚫 la table apparaît en ligne dans l'app mobile, publiée par l'agent
-- [ ] 🚫 un dessin « à vide » s'exécute de bout en bout (seule la position logicielle bouge)
+- [ ] la table est « en ligne » côté API, publiée par l'agent (guide, F1) — plus besoin de la publier à la main (D3)
+- [ ] `node dist/cli/selftest.js` est entièrement vert (voir plus bas)
+- [ ] la table apparaît en ligne dans l'app mobile, publiée par l'agent
+- [ ] un dessin « à vide » s'exécute de bout en bout (seule la position logicielle bouge)
 
 ## N3 — Moteurs, sans sable
 
@@ -129,7 +131,7 @@ Une webcam USB sur le Pi, au-dessus de la table, permet de suivre à distance.
 
 ---
 
-## `athar-agent selftest` — à implémenter
+## `node dist/cli/selftest.js` (dans `apps/table-agent`)
 
 Une commande qui produit un rapport lisible qu'on peut demander à n'importe quel
 moment à l'équipe sur place (« lance ça et envoie-moi la capture ») :

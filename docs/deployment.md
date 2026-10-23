@@ -4,7 +4,7 @@ Nothing has been deployed to a server. **Current plan: everything is installed a
 site, on a Raspberry Pi** (API and broker in Docker, the phone on the same Wi-Fi); see
 [hardware/GUIDE-EQUIPE-DUBAI.md](../hardware/GUIDE-EQUIPE-DUBAI.md). The Google Cloud VM below
 is paused, not removed, and comes later. The Raspberry Pi program that bridges the broker and
-the board (`apps/table-agent`) is not written yet. This document says how to deploy, what was
+the board (`apps/table-agent`) exists but has not yet run on a real Pi with a real board. This document says how to deploy, what was
 checked on a development machine, and what is still open. Commands marked **(verified)** were run
 for this document; everything else is instruction, not evidence.
 

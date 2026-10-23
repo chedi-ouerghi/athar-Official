@@ -8,7 +8,7 @@
 > sur un Raspberry Pi** (API + broker en Docker, téléphone sur le même Wi-Fi) :
 > `hardware/GUIDE-EQUIPE-DUBAI.md`. Le déploiement sur une VM Google Cloud est **en pause**
 > (fichiers conservés, rien n'est supprimé) et viendra plus tard. L'**agent du Pi**
-> (`apps/table-agent`), qui relie le broker à la carte DLC32, **n'est pas encore écrit**.
+> (`apps/table-agent`), qui relie le broker à la carte DLC32, existe mais n'a pas encore tourné sur un vrai Pi avec une vraie carte.
 
 ## 1. Le produit
 

@@ -1,0 +1,32 @@
+{
+  "name": "@athar/table-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ATHAR table agent: bridges the MQTT broker to a FluidNC controller over USB serial (runs on the table's Raspberry Pi 5).",
+  "type": "module",
+  "main": "dist/cli/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/cli/main.js",
+    "selftest": "tsc -p tsconfig.build.json && node dist/cli/selftest.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@athar/contracts": "workspace:*",
+    "@serialport/parser-readline": "^12.0.0",
+    "mqtt": "^5.16.1",
+    "serialport": "^12.0.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.3"
+  }
+}

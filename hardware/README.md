@@ -6,13 +6,15 @@ Files to deploy next to a real table (`TABLE_MODE=hardware`).
 step by step, with a "validated when" check at every step). How each test level works and what
 it must show: [`TESTING.md`](TESTING.md).
 
-| File                             | Runs on        | Goes to                                                        |
-| -------------------------------- | -------------- | -------------------------------------------------------------- |
-| `broker/acl`                     | MQTT broker    | `/mosquitto/config/acl` (single source for every setup)        |
-| `broker/mosquitto.conf`          | MQTT broker    | `/mosquitto/config/` (+ `passwd`, TLS certs): TLS-direct setup |
-| `table-agent/agent.example.yaml` | Raspberry Pi 5 | `/etc/athar/agent.yaml` (replace `REPLACE_WITH_TABLE_ID`)      |
-| `board/config.yaml`              | MKS DLC32      | FluidNC (sent with FluidTerm, see the guide, step E3)          |
-| `pi/setup-pi.sh`                 | Raspberry Pi 5 | run once over SSH: Docker, GitHub CLI, serial/MQTT tools       |
+| File                              | Runs on        | Goes to                                                                                    |
+| --------------------------------- | -------------- | ------------------------------------------------------------------------------------------ |
+| `broker/acl`                      | MQTT broker    | `/mosquitto/config/acl` (single source for every setup)                                    |
+| `broker/mosquitto.conf`           | MQTT broker    | `/mosquitto/config/` (+ `passwd`, TLS certs): TLS-direct setup                             |
+| `table-agent/agent.example.yaml`  | Raspberry Pi 5 | `/etc/athar/agent.yaml` (replace `REPLACE_WITH_TABLE_ID`)                                  |
+| `table-agent/athar-agent.service` | Raspberry Pi 5 | `/etc/systemd/system/athar-agent.service` (after `pnpm --filter @athar/table-agent build`) |
+| `board/config.yaml`               | MKS DLC32      | FluidNC (sent with FluidTerm, see the guide, step E3)                                      |
+| `pi/setup-pi.sh`                  | Raspberry Pi 5 | run once over SSH: Docker, GitHub CLI, serial/MQTT tools                                   |
+| `pi/preflight.sh`                 | Raspberry Pi 5 | read-only readiness check, run before each test session                                    |
 
 Three broker setups share the same `broker/acl`:
 
@@ -32,4 +34,7 @@ Facts that do not change between setups:
 - Create broker users with `mosquitto_passwd` (`-c` only for the first one), then give `passwd` to user 1883:
   `sudo chown 1883:1883 passwd && sudo chmod 600 passwd`, after every change.
 - The `presence` payload is the plain text `online` / `offline` (not JSON), including the Last Will.
-- `apps/table-agent` (the Raspberry Pi program between the broker and the board) is **not written yet**.
+- `apps/table-agent` (the Raspberry Pi program between the broker and the board) exists: build it with
+  `pnpm --filter @athar/table-agent build`, check it with `node apps/table-agent/dist/cli/selftest.js`
+  (`--motors` only with someone at the power switch), then run it with
+  `node apps/table-agent/dist/cli/main.js` or install `table-agent/athar-agent.service`.

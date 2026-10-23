@@ -6,7 +6,7 @@ starts a drawing, watches it progress, and can pause, resume or stop it. The tab
 is **simulated** by default (`TABLE_MODE=simulation`, and the app says "Simulation" on
 every screen that shows a table or a drawing). A hardware mode exists on the API side
 (`TABLE_MODE=hardware`, MQTT driver), but the program that runs on the table's Raspberry Pi and
-drives the board (`apps/table-agent`) is **not written yet**.
+drives the board (`apps/table-agent`) exists but has **not yet run on a real Pi with a real board**.
 
 ## Status
 

@@ -10,7 +10,9 @@ rapport (section 11).
 > **Ce qui a été vérifié, et ce qui ne l'a pas été.** Les étapes C et D (API, broker
 > Mosquitto, comptes, création de table, état « en ligne ») ont été **exécutées de bout en bout**
 > sur un PC (x86). Elles n'ont **pas** été jouées sur un vrai Raspberry Pi, ni avec un DLC32,
-> ni avec un téléphone. L'étape F (agent) est **bloquée** : le programme n'existe pas encore.
+> ni avec un téléphone. L'agent (`apps/table-agent`, étape F) existe et est couvert par ses propres
+> tests (sans matériel), mais n'a pas encore tourné sur un vrai Pi avec une vraie carte au moment
+> d'écrire ces lignes — c'est justement ce que ce guide vous fait valider.
 > Si une commande se comporte autrement chez vous, c'est une information précieuse :
 > envoyez le rapport (section 11).
 
@@ -37,16 +39,16 @@ flowchart LR
   T["Téléphone (app Athar)"] -- "Wi-Fi, http :3000" --> A["API (Docker, sur le Pi)"]
   AD["Admin (navigateur du PC)"] -- "Wi-Fi, http :3000" --> A
   A -- "MQTT :1883" --> B["Broker Mosquitto (Docker, sur le Pi)"]
-  B -- "MQTT 127.0.0.1:1883" --> G["Agent (sur le Pi) — À ÉCRIRE"]
+  B -- "MQTT 127.0.0.1:1883" --> G["Agent (sur le Pi), apps/table-agent"]
   G -- "USB série 115200" --> D["Carte DLC32 + FluidNC"]
   D -- "impulsions" --> M["Moteurs"]
 ```
 
 - L'**API** et le **broker** tournent dans Docker sur le Pi (`deploy/docker-compose.yml`
   - `deploy/docker-compose.local.yml`). Le téléphone et le PC se connectent à l'API par le Wi-Fi.
-- L'**agent** (`apps/table-agent`) est le programme qui fait le lien entre le broker et la carte.
-  **Il n'existe pas encore** : tant qu'il manque, on peut tout tester jusqu'au broker et séparément
-  la carte, mais pas encore « le téléphone fait bouger la table ».
+- L'**agent** (`apps/table-agent`) est le programme qui fait le lien entre le broker et la carte :
+  il convertit un dessin (`theta`/`rho`) en G-code, le streame à la carte, et remonte l'état
+  (étape F1 ci-dessous).
 - La carte **DLC32** exécute FluidNC. Le Pi lui envoie du G-code par le câble USB.
 
 Une fois la table qui dessine, le chemin sera : téléphone → API → broker → agent → USB → DLC32 → moteurs.
@@ -111,7 +113,9 @@ Puis récupérez le dépôt et installez les outils :
 ```bash
 gh repo clone chedi-ouerghi/athar-Official ~/athar-Official
 cd ~/athar-Official
-git switch chore/cleanup-hardware-guide   # tant que la Pull Request n'est pas fusionnée ; ensuite : git switch master
+# L'agent (apps/table-agent) n'existe que sur cette branche tant qu'elle n'est pas fusionnée dans master.
+git switch feat/table-agent   # une fois fusionnée : git switch master
+test -f apps/table-agent/package.json && echo "agent présent"
 bash hardware/pi/setup-pi.sh
 ```
 
@@ -134,6 +138,15 @@ type athar
 (la dernière doit afficher `athar is aliased to …`.)
 
 ---
+
+### Pi sans internet (réseau purement local)
+
+Internet n'est nécessaire qu'à l'installation (apt, Docker, `gh`, `pnpm install`, zip FluidNC, images Docker) :
+faites les étapes A, B et `athar build api` / `docker pull eclipse-mosquitto:2` **en ligne**, puis le banc peut tourner sur un Wi-Fi sans internet.
+Le Pi 5 n'a pas de pile d'horloge par défaut : hors ligne, l'heure repart d'une date fausse à chaque redémarrage.
+Réglez-la à la main si besoin (`sudo timedatectl set-ntp false && sudo timedatectl set-time "AAAA-MM-JJ HH:MM:SS"`).
+`selftest` l'affiche en `[--]` (information), ce n'est pas bloquant : les échanges MQTT ne dépendent pas de l'heure.
+Vérification rapide de toute la préparation : `bash hardware/pi/preflight.sh`.
 
 ## 5. Étape C — Lancer l'API et le broker
 
@@ -288,6 +301,8 @@ ls -l /dev/serial/by-id/
 
 **✅ Validé quand** une ligne apparaît (pour le DLC32 : un nom contenant `1a86` ou `USB_Serial`, la puce CH340 ; c'est le chemin attendu par `agent.example.yaml`). Notez-la. Si rien n'apparaît : câble « charge seulement » ou câble défectueux.
 
+> **ESP32 seul :** un DevKit a souvent une puce CP2102 (nom contenant `10c4` / `CP2102`) et non CH340. Recopiez alors la ligne relevée ici dans `board.port` de `/etc/athar/agent.yaml` (étape F1) : sans cela l'agent et `selftest` ne trouvent pas la carte. Même chose pour tout autre câble/chipset.
+
 ### E2 — Installer le firmware FluidNC officiel
 
 On utilise le paquet officiel de FluidNC (version vérifiée pour ce guide : `v4.1.1` ; si une plus récente non « Pre » existe sur github.com/bdring/FluidNC/releases, prenez-la et adaptez le nom).
@@ -348,17 +363,42 @@ Avec le DLC32 seulement, et **alimentation des moteurs branchée pour la premiè
 
 ## 8. Étape F — Agent et application mobile
 
-### F1 — L'agent du Pi — 🚫 BLOQUÉ tant que `apps/table-agent` n'existe pas
+### F1 — L'agent du Pi
 
-L'agent est le programme du Pi qui écoute le broker, convertit les dessins en G-code et les envoie à la carte. **Il n'est pas écrit.** Aucune commande de ce guide ne peut l'installer ni le lancer. Ce qui existe déjà et que l'agent utilisera :
+L'agent (`apps/table-agent`) est le programme du Pi qui écoute le broker, convertit les dessins en
+G-code et les envoie à la carte. Il remplace l'étape D3 (publier `online` à la main) : c'est lui qui
+le fait désormais, au démarrage et via son Last Will.
 
-- le modèle de configuration [`hardware/table-agent/agent.example.yaml`](table-agent/agent.example.yaml) ;
-- le protocole MQTT, défini dans `packages/contracts/src/device-protocol.ts` ;
-- le compte broker de la table (étape D2) et le port série de la carte (étape E1).
+Sur le Pi, dans `~/athar-Official` :
 
-En mode local, quand l'agent existera, son adresse de broker sera `mqtt://127.0.0.1:1883` (le Pi lui-même) et non `wss://mqtt.<domaine>`, qui est celle du cloud. C'est une **prévision**, à confirmer avec l'agent. En attendant, l'étape D3 (publier `online` à la main) reproduit ce que l'agent fera au démarrage.
+```bash
+cp hardware/table-agent/agent.example.yaml /tmp/agent.yaml   # puis éditez-le (voir ci-dessous)
+sudo mkdir -p /etc/athar
+sudo mv /tmp/agent.yaml /etc/athar/agent.yaml
+printf '%s' 'MOT_DE_PASSE_DE_LA_TABLE' | sudo tee /etc/athar/mqtt.secret >/dev/null   # le mot de passe de l'étape D2, sans retour à la ligne
+sudo chmod 600 /etc/athar/mqtt.secret
+pnpm install --filter @athar/table-agent...
+pnpm --filter @athar/table-agent build
+```
 
-**✅ Validé quand** : rien à valider ici avant que l'agent existe.
+Dans `/etc/athar/agent.yaml`, remplacez `REPLACE_WITH_TABLE_ID` par `$TABLE_ID` (étape D), l'URL par
+`mqtt://127.0.0.1:1883` (mode local, sans TLS : retirez aussi `ca_file`), et mesurez `radius_mm` au
+montage. Puis un premier contrôle sans toucher aux moteurs :
+
+```bash
+node apps/table-agent/dist/cli/selftest.js
+```
+
+**✅ Validé quand** chaque ligne du rapport affiche `[OK]` (sauf `motors`, normal sans `--motors`).
+Une fois vert, lancez l'agent au premier plan pour observer ses journaux :
+
+```bash
+node apps/table-agent/dist/cli/main.js
+```
+
+Et seulement après un `selftest` vert à froid, installez le service (section 10, et
+[`table-agent/athar-agent.service`](table-agent/athar-agent.service)) pour qu'il démarre tout seul au
+redémarrage du Pi.
 
 ### F2 — L'application mobile (sur votre PC, pas sur le Pi)
 
@@ -386,7 +426,7 @@ Ouvrez l'application sur le téléphone (même Wi-Fi). Si vous changez la variab
 
 **✅ Validé quand** l'application s'ouvre sur le téléphone et son écran « Connection details » (ou la page de diagnostic) indique que l'API répond et que son mode est `hardware`.
 
-Le parcours client complet (créer un client, préparer une table pour lui, scanner le QR code) est décrit dans [`docs/admin.md`](../docs/admin.md). Il est testable jusqu'à l'état « en ligne » (étape D3), mais **un dessin ne démarre pas vraiment tant que l'agent manque**.
+Le parcours client complet (créer un client, préparer une table pour lui, scanner le QR code) est décrit dans [`docs/admin.md`](../docs/admin.md), et un dessin démarre vraiment une fois l'agent lancé (étape F1).
 
 ---
 

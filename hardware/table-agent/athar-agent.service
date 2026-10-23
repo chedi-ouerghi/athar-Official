@@ -1,0 +1,34 @@
+# Athar table agent — systemd service for the Raspberry Pi 5.
+#
+# Install (as root, on the Pi, after `pnpm --filter @athar/table-agent build`
+# has produced apps/table-agent/dist):
+#
+#   sudo cp hardware/table-agent/athar-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now athar-agent
+#
+# Logs: journalctl -u athar-agent -f
+#
+# Requires /etc/athar/agent.yaml (see agent.example.yaml) and
+# /etc/athar/mqtt.secret (chmod 600) to already exist. Edit the two paths
+# below (User, WorkingDirectory) to match where the repo was cloned and which
+# user has the `dialout` group (for the serial port) — see
+# hardware/GUIDE-EQUIPE-DUBAI.md, step B.
+
+[Unit]
+Description=Athar table agent (MQTT <-> FluidNC bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_PI_USER
+WorkingDirectory=/home/REPLACE_WITH_PI_USER/athar-Official/apps/table-agent
+ExecStart=/usr/bin/node dist/cli/main.js
+Restart=on-failure
+RestartSec=5
+# A homing cycle or a long drawing must not be cut short by a slow stop.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
