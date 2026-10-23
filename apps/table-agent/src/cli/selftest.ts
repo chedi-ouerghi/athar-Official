@@ -8,7 +8,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { SerialBoardPort } from '../board/serial-board-port.js';
-import { AgentConfigError, DEFAULT_CONFIG_PATH, loadAgentConfig, type AgentConfig } from '../config/load-config.js';
+import {
+  AgentConfigError,
+  DEFAULT_CONFIG_PATH,
+  loadAgentConfig,
+  type AgentConfig,
+} from '../config/load-config.js';
 import { connectMqtt } from '../mqtt/connect-mqtt.js';
 import { CliUsageError, isEntryPoint, processIo, type CliIo } from './cli-io.js';
 
@@ -121,7 +126,10 @@ export async function runSelftest(argv: readonly string[], io: CliIo): Promise<n
         '(hardware/GUIDE-EQUIPE-DUBAI.md, step E4) for a hands-on test, with someone on the power switch.',
     );
   } else {
-    report(io, { ok: null, label: 'motors: not tested (use --motors with someone at the power switch)' });
+    report(io, {
+      ok: null,
+      label: 'motors: not tested (use --motors with someone at the power switch)',
+    });
   }
 
   return failed ? 1 : 0;
@@ -199,12 +207,27 @@ async function checkBroker(config: AgentConfig, password: string, io: CliIo): Pr
 
 async function checkClockSync(): Promise<StepResult> {
   try {
-    const { stdout } = await execFileAsync('timedatectl', ['show', '-p', 'NTPSynchronized', '--value']);
+    const { stdout } = await execFileAsync('timedatectl', [
+      'show',
+      '-p',
+      'NTPSynchronized',
+      '--value',
+    ]);
     const synced = stdout.trim() === 'yes';
 
-    return { ok: synced, label: `system clock NTP-synchronised: ${stdout.trim() || 'unknown'}` };
+    // Informational: a Pi on an offline network is never NTP-synchronised, and nothing here depends on the date.
+    return synced
+      ? { ok: true, label: 'system clock NTP-synchronised: yes' }
+      : {
+          ok: null,
+          label:
+            'system clock NTP-synchronised: no (normal offline; set it by hand if the date looks wrong)',
+        };
   } catch {
-    return { ok: null, label: 'system clock sync: skipped (timedatectl unavailable on this machine)' };
+    return {
+      ok: null,
+      label: 'system clock sync: skipped (timedatectl unavailable on this machine)',
+    };
   }
 }
 

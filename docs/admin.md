@@ -89,7 +89,7 @@ inside Docker); the controller on the Pi itself connects to `127.0.0.1` with the
 Creating a table does **not** create its broker account. Run, on the Pi, the commands from block B (they are
 the ones of the [hardware guide](../hardware/GUIDE-EQUIPE-DUBAI.md), step D2): type the password
 shown in block B when asked. Then, in the table list, the **Online?** badge becomes **Online** as soon as the
-table controller (the agent, not written yet) publishes `online`. To test without an agent, see step D3 of the guide.
+table controller (the agent, `apps/table-agent`) publishes `online`. To test without an agent, see step D3 of the guide.
 
 If the badge stays **Offline**, press **Details** on the table: it explains the likely causes.
 

@@ -113,7 +113,9 @@ Puis récupérez le dépôt et installez les outils :
 ```bash
 gh repo clone chedi-ouerghi/athar-Official ~/athar-Official
 cd ~/athar-Official
-git switch chore/cleanup-hardware-guide   # tant que la Pull Request n'est pas fusionnée ; ensuite : git switch master
+# L'agent (apps/table-agent) n'existe que sur cette branche tant qu'elle n'est pas fusionnée dans master.
+git switch feat/table-agent   # une fois fusionnée : git switch master
+test -f apps/table-agent/package.json && echo "agent présent"
 bash hardware/pi/setup-pi.sh
 ```
 
@@ -136,6 +138,15 @@ type athar
 (la dernière doit afficher `athar is aliased to …`.)
 
 ---
+
+### Pi sans internet (réseau purement local)
+
+Internet n'est nécessaire qu'à l'installation (apt, Docker, `gh`, `pnpm install`, zip FluidNC, images Docker) :
+faites les étapes A, B et `athar build api` / `docker pull eclipse-mosquitto:2` **en ligne**, puis le banc peut tourner sur un Wi-Fi sans internet.
+Le Pi 5 n'a pas de pile d'horloge par défaut : hors ligne, l'heure repart d'une date fausse à chaque redémarrage.
+Réglez-la à la main si besoin (`sudo timedatectl set-ntp false && sudo timedatectl set-time "AAAA-MM-JJ HH:MM:SS"`).
+`selftest` l'affiche en `[--]` (information), ce n'est pas bloquant : les échanges MQTT ne dépendent pas de l'heure.
+Vérification rapide de toute la préparation : `bash hardware/pi/preflight.sh`.
 
 ## 5. Étape C — Lancer l'API et le broker
 
@@ -289,6 +300,8 @@ ls -l /dev/serial/by-id/
 ```
 
 **✅ Validé quand** une ligne apparaît (pour le DLC32 : un nom contenant `1a86` ou `USB_Serial`, la puce CH340 ; c'est le chemin attendu par `agent.example.yaml`). Notez-la. Si rien n'apparaît : câble « charge seulement » ou câble défectueux.
+
+> **ESP32 seul :** un DevKit a souvent une puce CP2102 (nom contenant `10c4` / `CP2102`) et non CH340. Recopiez alors la ligne relevée ici dans `board.port` de `/etc/athar/agent.yaml` (étape F1) : sans cela l'agent et `selftest` ne trouvent pas la carte. Même chose pour tout autre câble/chipset.
 
 ### E2 — Installer le firmware FluidNC officiel
 
