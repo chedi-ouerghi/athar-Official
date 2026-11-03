@@ -1,0 +1,42 @@
+# Athar - agent du Pi 5 pour LA table ho57btw7htrpxx7k (copier vers /etc/athar/agent.yaml).
+# Le mot de passe n'est pas ici : mettre TABLE_MQTT_PASSWORD (de apps/api/.env) dans
+# /etc/athar/mqtt.secret avec chmod 600.
+#   printf '%s' "$TABLE_MQTT_PASSWORD" | sudo tee /etc/athar/mqtt.secret >/dev/null
+#   sudo chmod 600 /etc/athar/mqtt.secret
+
+table:
+  id: ho57btw7htrpxx7k
+
+mqtt:
+  # L'agent tourne sur le même Pi que mosquitto, dont le port 1883 n'est publié que sur
+  # 127.0.0.1 (deploy/docker-compose.local.yml). Pas de TLS : pas de ca_file.
+  url: mqtt://127.0.0.1:1883
+  username: ho57btw7htrpxx7k
+  password_file: /etc/athar/mqtt.secret
+  keepalive_s: 30
+  clean_session: false
+  will:
+    topic: athar/v1/t/ho57btw7htrpxx7k/presence
+    payload: offline
+    qos: 1
+    retain: true
+
+board:
+  port: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+  baud: 115200
+  planner_buffer_lines: 12
+  status_poll_ms: 250
+
+# Prudent : course Y de la carte = 22 mm, vitesses <= 500 mm/min (8 mm/s).
+geometry:
+  shape: circle
+  radius_mm: 22
+  rho_margin: 0.05
+  coupling_mm_per_deg: 0.0
+
+motion:
+  ball_speed_mm_s: 5
+  max_theta_deg_per_s: 8
+  segment_max_deg: 2
+  rewrap_theta_when_idle: true
+  home_before_job: true
