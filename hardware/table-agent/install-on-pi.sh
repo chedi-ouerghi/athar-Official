@@ -22,9 +22,11 @@ PASSWORD=$(get TABLE_MQTT_PASSWORD)
 
 # Remplace l'id et l'URL du modèle par ceux du .env.
 sudo mkdir -p /etc/athar
-sed -e "s#ho57btw7htrpxx7k#$TABLE_ID#g" \
-    -e "s#^\(  url: \).*#\1$MQTT_URL#" \
-    "$TEMPLATE" | sudo tee /etc/athar/agent.yaml >/dev/null
+sed -e "s#ho57btw7htrpxx7k#$TABLE_ID#g" "$TEMPLATE" > /tmp/athar-agent.yaml
+if [ -n "$MQTT_URL" ]; then
+  sed -i "s#^  url: .*#  url: $MQTT_URL#" /tmp/athar-agent.yaml
+fi
+sudo mv /tmp/athar-agent.yaml /etc/athar/agent.yaml
 
 printf '%s' "$PASSWORD" | sudo tee /etc/athar/mqtt.secret >/dev/null
 sudo chmod 600 /etc/athar/mqtt.secret
