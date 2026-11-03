@@ -12,7 +12,13 @@ const { getDefaultConfig } = require('expo/metro-config');
  * `packages/contracts`.
  */
 
-const projectRoot = __dirname;
+// Windows: Expo started from some shells (e.g. VS Code) sees the path as `c:\...`,
+// while pnpm's symlinks resolve to `C:\...`. Metro compares paths case-sensitively,
+// so with a lowercase drive it cannot find `expo-router/entry` and the web page
+// gets a 404 instead of the bundle. Always use an uppercase drive letter.
+const upperDrive = (p) => p.replace(/^[a-z]:/, (drive) => drive.toUpperCase());
+
+const projectRoot = upperDrive(__dirname);
 const workspaceRoot = path.resolve(projectRoot, '..', '..');
 
 const config = getDefaultConfig(projectRoot);

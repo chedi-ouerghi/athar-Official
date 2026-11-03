@@ -22,7 +22,13 @@ import { streamGcode } from '../motion/gcode-stream.js';
 import { planGcodeMotion } from '../motion/polar-to-gcode.js';
 import type { MqttPort } from '../mqtt/mqtt-port.js';
 
-const MAX_MESSAGE_BYTES = 64 * 1024;
+/**
+ * Largest command message the agent will parse. It must hold a full trajectory:
+ * the contract allows TRAJECTORY_MAX_POINTS (50 000) points, and the built-in
+ * designs already reach ~170 KB (a 64 KB cap silently dropped them, so the API
+ * never got an `ack` and failed the job as OFFLINE).
+ */
+const MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
 /** Bounded so a long-running agent does not grow this map forever. */
 const RECENT_ACK_LIMIT = 64;
 const MIN_PLAN_LENGTH = 1e-9;

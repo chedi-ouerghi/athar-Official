@@ -37,11 +37,12 @@ An account that is not an admin is refused.
 
 ## What you see
 
-| Section      | What it is for                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------- |
-| How it works | The four steps, in order                                                                           |
-| 1. Customers | Create customers; give a new activation code; disable a customer                                   |
-| 2. Tables    | List, search, create (**Provision a table**), see the state, configure, enable/disable, pairing QR |
+| Section        | What it is for                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| How it works   | The four steps, in order                                                                           |
+| 1. Customers   | Create customers; give a new activation code; disable a customer                                   |
+| Administrators | Create another active administrator with an initial password                                       |
+| 2. Tables      | List, search, create (**Provision a table**), see the state, configure, enable/disable, pairing QR |
 
 The **Online?** column is read every 10 seconds while the page is open (and when you press
 **Refresh now**). It shows:
@@ -66,6 +67,14 @@ The state comes from `GET /api/v1/tables/:id`, which an admin may call for any t
    everywhere and asks for confirmation).
 
 An empty list says: "No customers yet. Create the first one with the form above."
+
+### Create an administrator
+
+In **Administrators**, enter the new admin's email, name and initial password (at least 14
+characters), then press **Create administrator**. The account is active immediately; share the
+password with its owner securely. The password is never returned by the API or stored in plaintext.
+Only a signed-in administrator can create another administrator. The `admin:create` command remains
+the way to bootstrap the first admin.
 
 ### 2. Create a table (provision it)
 

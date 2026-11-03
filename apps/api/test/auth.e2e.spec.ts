@@ -1,5 +1,10 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { apiErrorResponseSchema, meResponseSchema, sessionResponseSchema } from '@athar/contracts';
+import {
+  apiErrorResponseSchema,
+  createAdminResponseSchema,
+  meResponseSchema,
+  sessionResponseSchema,
+} from '@athar/contracts';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AccountsService } from '../src/auth/accounts.service.js';
@@ -187,6 +192,75 @@ describe('auth over HTTP', () => {
 
       expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
     });
+  });
+});
+
+describe('admin account creation over HTTP', () => {
+  let app: NestExpressApplication;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const http = () => request(app.getHttpServer());
+
+  it('requires an administrator session', async () => {
+    await http().post('/api/v1/admin/admins').send({}).expect(401);
+
+    const customer = await signIn(app, 'customer');
+    const response = await http()
+      .post('/api/v1/admin/admins')
+      .set(bearer(customer))
+      .send({})
+      .expect(403);
+
+    expect(errorOf(response.body).code).toBe('FORBIDDEN');
+  });
+
+  it('creates an active administrator without returning a password or hash', async () => {
+    const admin = await signIn(app);
+    const password = 'a-secure-admin-password';
+    const response = await http()
+      .post('/api/v1/admin/admins')
+      .set(bearer(admin))
+      .send({
+        email: ' New-Admin@athar.test ',
+        displayName: ' New admin ',
+        password,
+      })
+      .expect(201);
+    const account = createAdminResponseSchema.parse(response.body);
+
+    expect(account).toMatchObject({
+      email: 'new-admin@athar.test',
+      displayName: 'New admin',
+      role: 'admin',
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/password|hash|scrypt/i);
+    await http().post('/api/v1/auth/login').send({ email: account.email, password }).expect(200);
+  });
+
+  it('rejects duplicate email addresses and weak passwords', async () => {
+    const admin = await signIn(app);
+    const create = (email: string, password: string) =>
+      http()
+        .post('/api/v1/admin/admins')
+        .set(bearer(admin))
+        .send({ email, displayName: 'Admin', password });
+
+    const duplicate = await create(
+      admin.account.email.toUpperCase(),
+      'a-secure-admin-password',
+    ).expect(409);
+    expect(errorOf(duplicate.body).code).toBe('ACCOUNT_EXISTS');
+
+    const weakPassword = await create('weak-password@athar.test', 'too-short').expect(400);
+    expect(errorOf(weakPassword.body).code).toBe('VALIDATION_FAILED');
+    expect(JSON.stringify(weakPassword.body)).not.toContain('too-short');
   });
 });
 

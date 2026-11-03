@@ -474,6 +474,30 @@
           </table>
         </section>
         <section>
+          <h2>Administrators</h2>
+          <p class="hint">
+            Create an active admin account. The password must be at least 14 characters.
+          </p>
+          <form id="admin-form">
+            <label
+              >Admin email <input name="email" type="email" autocomplete="email" required
+            /></label>
+            <label>Admin name <input name="displayName" required maxlength="100" /></label>
+            <label
+              >Initial password
+              <input
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                minlength="14"
+                maxlength="200"
+                required
+              />
+            </label>
+            <button type="submit">Create administrator</button>
+          </form>
+        </section>
+        <section>
           <div class="head">
             <h2>2. Tables <span class="muted" id="table-count"></span></h2>
             <input
@@ -511,11 +535,35 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script>
-      // Token lives in memory only: closing or reloading the tab signs out.
+      // The access token lives in memory. The refresh token is kept in localStorage so
+      // reloading or reopening the tab keeps you signed in; "Sign out" removes it.
+      const SESSION_KEY = 'athar-admin-session';
       let base = '',
         token = '',
+        refreshToken = '',
+        refreshing = null,
         customers = [],
         tables = [];
+      function saveSession() {
+        try {
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ base, refreshToken }));
+        } catch {}
+      }
+      function clearSession() {
+        token = '';
+        refreshToken = '';
+        try {
+          localStorage.removeItem(SESSION_KEY);
+        } catch {}
+      }
+      function readSession() {
+        try {
+          const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null');
+          return s && typeof s.base === 'string' && typeof s.refreshToken === 'string' ? s : null;
+        } catch {
+          return null;
+        }
+      }
       const $ = (id) => document.getElementById(id);
       const el = (tag, props = {}, ...kids) => {
         const n = Object.assign(document.createElement(tag), props);
@@ -551,7 +599,41 @@
           'This table already has an owner, so a new pairing code is not needed.',
       };
 
-      async function api(method, path, body) {
+      // Swap the refresh token for a new pair. One at a time: the API treats a reused
+      // refresh token as theft and ends the session.
+      function renewSession() {
+        refreshing ??= (async () => {
+          try {
+            const s = await api('POST', '/auth/refresh', { refreshToken }, false);
+            token = s.accessToken;
+            refreshToken = s.refreshToken;
+            saveSession();
+          } catch (e) {
+            clearSession();
+            throw e;
+          } finally {
+            refreshing = null;
+          }
+        })();
+        return refreshing;
+      }
+
+      async function api(method, path, body, retry = true) {
+        const res = await send(method, path, body);
+        // The access token expired (15 min): renew it once, then repeat the call.
+        if (res.status === 401 && retry && refreshToken && !/^\/auth\/(login|refresh)/.test(path)) {
+          try {
+            await renewSession();
+          } catch (e) {
+            showLogin('Your session has ended. Sign in again.');
+            throw e;
+          }
+          return read(await send(method, path, body));
+        }
+        return read(res);
+      }
+
+      async function send(method, path, body) {
         let res;
         try {
           res = await fetch(`${base}/api/v1${path}`, {
@@ -567,6 +649,10 @@
             `Cannot reach the API at ${base}. Check that: (1) the API is running, (2) the address is right, (3) you opened this page from http://localhost:<port> (the API only accepts pages from localhost, or from an address listed in CORS_ORIGINS).`,
           );
         }
+        return res;
+      }
+
+      async function read(res) {
         if (res.status === 204) return null;
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1001,11 +1087,25 @@
                 el('button', {
                   className: 'secondary',
                   textContent: 'Pairing QR',
-                  disabled: !!t.ownerAccountId,
                   title: t.ownerAccountId
-                    ? 'This table already has an owner'
+                    ? 'Remove the current owner and show a new QR code to pair the table'
                     : 'Show the QR code the customer scans',
-                  onclick: () => run(() => claimDialog(t)),
+                  onclick: () =>
+                    run(async () => {
+                      // A code can only be issued for a table nobody owns: free it first.
+                      if (t.ownerAccountId) {
+                        if (
+                          !confirm(
+                            `"${t.displayName}" belongs to ${customerName(t.ownerAccountId)}. Remove this owner and issue a new pairing QR? Whoever scans it becomes the owner.`,
+                          )
+                        )
+                          return;
+                        t = await api('PATCH', `/admin/tables/${t.id}`, {
+                          ownerAccountId: null,
+                        });
+                      }
+                      await claimDialog(t);
+                    }),
                 }),
               ),
             ),
@@ -1312,6 +1412,30 @@
         );
       }
 
+      // Only an admin gets past the sign-in screen.
+      async function enterAsAdmin() {
+        const me = await api('GET', '/auth/me');
+        if (me.role !== 'admin') {
+          await api('POST', '/auth/logout', {}).catch(() => {});
+          throw new Error('This account is not an admin.');
+        }
+        saveSession();
+        $('password').value = '';
+        $('who').textContent = me.email;
+        $('login').hidden = true;
+        $('app').hidden = false;
+        await load();
+      }
+
+      function showLogin(message = '') {
+        clearSession();
+        clearInterval(refreshTimer);
+        states = new Map();
+        $('app').hidden = true;
+        $('login').hidden = false;
+        $('login-error').textContent = message;
+      }
+
       $('login-form').addEventListener('submit', async (ev) => {
         ev.preventDefault();
         base = $('api').value.trim().replace(/\/+$/, '');
@@ -1322,31 +1446,33 @@
             password: $('password').value,
           });
           token = s.accessToken;
-          const me = await api('GET', '/auth/me');
-          if (me.role !== 'admin') {
-            await api('POST', '/auth/logout', {}).catch(() => {});
-            throw new Error('This account is not an admin.');
-          }
-          $('password').value = '';
-          $('who').textContent = me.email;
-          $('login').hidden = true;
-          $('app').hidden = false;
-          await load();
+          refreshToken = s.refreshToken;
+          await enterAsAdmin();
         } catch (e) {
-          token = '';
-          $('login-error').textContent = e.message;
+          showLogin(e.message);
         }
       });
       $('logout').onclick = async () => {
         try {
           await api('POST', '/auth/logout', {});
         } catch {}
-        token = '';
-        clearInterval(refreshTimer);
-        states = new Map();
-        $('app').hidden = true;
-        $('login').hidden = false;
+        showLogin();
       };
+
+      // Reopened tab: resume the saved session, or stay on the sign-in screen.
+      (async () => {
+        const saved = readSession();
+        if (!saved) return;
+        base = saved.base;
+        refreshToken = saved.refreshToken;
+        $('api').value = base;
+        try {
+          await renewSession();
+          await enterAsAdmin();
+        } catch (e) {
+          showLogin(`Please sign in again. ${e.message}`);
+        }
+      })();
       $('refresh').onclick = () => run(load);
       $('provision').onclick = provisionDialog;
       $('filter').addEventListener('input', render);
@@ -1362,6 +1488,23 @@
           f.reset();
           accessDialog('Customer created', r);
           await load();
+        });
+      });
+      $('admin-form').addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        const f = ev.target;
+        run(async () => {
+          const account = await api('POST', '/admin/admins', {
+            email: f.email.value,
+            displayName: f.displayName.value,
+            password: f.password.value,
+          });
+          f.reset();
+          dialog('Administrator created', [
+            el('p', {
+              textContent: `${account.email} can now sign in with the password you set.`,
+            }),
+          ]);
         });
       });
     </script>
