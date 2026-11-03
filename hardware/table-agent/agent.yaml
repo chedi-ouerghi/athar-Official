@@ -8,8 +8,9 @@ table:
   id: ho57btw7htrpxx7k
 
 mqtt:
-  # Même valeur que MQTT_URL dans apps/api/.env (mqtt:// sans TLS : pas de ca_file).
-  url: mqtt://192.168.81.125:1883
+  # L'agent tourne sur le même Pi que mosquitto, dont le port 1883 n'est publié que sur
+  # 127.0.0.1 (deploy/docker-compose.local.yml). Pas de TLS : pas de ca_file.
+  url: mqtt://127.0.0.1:1883
   username: ho57btw7htrpxx7k
   password_file: /etc/athar/mqtt.secret
   keepalive_s: 30
