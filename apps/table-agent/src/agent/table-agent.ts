@@ -86,6 +86,11 @@ export class TableAgent {
   async start(): Promise<void> {
     await this.board.open();
 
+    // MQTT is already connecting (see main.ts) and may have published the status
+    // while the port was still closed: that retained `error` would otherwise stay
+    // until the next command, and the API refuses every job while it reads `error`.
+    this.publishStatus();
+
     this.statusPollTimer = setInterval(() => {
       if (this.board.isOpen) {
         this.board.sendRealtime('?');
