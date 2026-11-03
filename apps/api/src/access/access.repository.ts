@@ -199,6 +199,27 @@ export class TableAccessRepository {
     }));
   }
 
+  /**
+   * Give an account guest access to a table directly, replacing any guest access
+   * it already had there. Only dev tooling calls this; the app grants guests
+   * through share links.
+   */
+  grantGuest(guest: GuestRecord, now: number): Promise<void> {
+    const key = guestKey(guest.tableId, guest.accountId);
+
+    return this.store.change((records) => ({
+      next: [
+        ...records.filter(
+          (record) =>
+            isKept(record, now) &&
+            !(isGuestRecord(record) && guestKey(record.tableId, record.accountId) === key),
+        ),
+        guest,
+      ],
+      result: undefined,
+    }));
+  }
+
   /** Stop every claim token of a table from working (a fresh one replaces them). */
   revokeClaims(tableId: string, at: string): Promise<void> {
     return this.store.change((records) => ({

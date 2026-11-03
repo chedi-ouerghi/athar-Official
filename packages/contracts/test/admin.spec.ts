@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   adminCustomerSchema,
   adminTableSchema,
+  createAdminRequestSchema,
+  createAdminResponseSchema,
   createCustomerRequestSchema,
   createTableRequestSchema,
   customerAccessResponseSchema,
@@ -215,6 +217,36 @@ describe('customers', () => {
     expect(
       createCustomerRequestSchema.safeParse({ email: 'r@example.com', displayName: ' ' }).success,
     ).toBe(false);
+  });
+
+  it('validates administrator credentials and returns only the account', () => {
+    const input = {
+      email: ' Admin@Example.COM ',
+      displayName: ' Admin ',
+      password: 'a-secure-admin-password',
+    };
+
+    expect(createAdminRequestSchema.parse(input)).toStrictEqual({
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      password: input.password,
+    });
+    expect(createAdminRequestSchema.safeParse({ ...input, password: 'too-short' }).success).toBe(
+      false,
+    );
+    expect(
+      createAdminResponseSchema.parse({
+        id: 'admin-1',
+        email: 'admin@example.com',
+        displayName: 'Admin',
+        role: 'admin',
+      }),
+    ).toStrictEqual({
+      id: 'admin-1',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+    });
   });
 
   it('shows a customer with a status and never a hash', () => {

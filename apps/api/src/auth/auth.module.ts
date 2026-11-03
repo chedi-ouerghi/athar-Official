@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { CLOCK, systemClock, type Clock } from '../device/clock.js';
 import { AccountRepository } from './account.repository.js';
 import { AccountsService } from './accounts.service.js';
+import { AdminAdminsController } from './admin-admins.controller.js';
 import { AdminCustomersController } from './admin-customers.controller.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
@@ -29,7 +30,7 @@ export class AuthModule {
     return {
       module: AuthModule,
       global: true,
-      controllers: [AuthController, AdminCustomersController],
+      controllers: [AuthController, AdminAdminsController, AdminCustomersController],
       providers: [
         { provide: AccountRepository, useValue: options.accounts },
         { provide: SessionRepository, useValue: options.sessions },

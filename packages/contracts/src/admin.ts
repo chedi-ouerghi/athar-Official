@@ -10,7 +10,12 @@
  */
 
 import { z } from 'zod';
-import { accountDisplayNameSchema, authAccountSchema, emailSchema } from './auth.js';
+import {
+  accountDisplayNameSchema,
+  adminPasswordSchema,
+  authAccountSchema,
+  emailSchema,
+} from './auth.js';
 import { planSchema } from './entitlements.js';
 import { pairingLinkSchema, pairingTokenSchema } from './pairing.js';
 import { DEFAULT_TABLE_GEOMETRY, tableGeometrySchema } from './geometry.js';
@@ -243,6 +248,22 @@ export type CustomerAccessResponse = z.infer<typeof customerAccessResponseSchema
 export const createCustomerResponseSchema = customerAccessResponseSchema;
 export type CreateCustomerResponse = CustomerAccessResponse;
 export const resetCustomerAccessResponseSchema = customerAccessResponseSchema;
+
+// ---------------------------------------------------------------------------
+// Administrators
+// ---------------------------------------------------------------------------
+
+/** Body of `POST /api/v1/admin/admins`. */
+export const createAdminRequestSchema = z.object({
+  email: emailSchema,
+  displayName: accountDisplayNameSchema,
+  password: adminPasswordSchema,
+});
+export type CreateAdminRequest = z.infer<typeof createAdminRequestSchema>;
+
+/** Payload of `POST /api/v1/admin/admins` (`201`), without credentials. */
+export const createAdminResponseSchema = authAccountSchema;
+export type CreateAdminResponse = z.infer<typeof createAdminResponseSchema>;
 export type ResetCustomerAccessResponse = CustomerAccessResponse;
 
 /** Payload of `GET /api/v1/admin/customers`, oldest first. */

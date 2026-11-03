@@ -14,6 +14,8 @@
     "table:create": "tsc -p tsconfig.build.json && node dist/cli/table-create.js",
     "admin:create": "tsc -p tsconfig.build.json && node dist/cli/admin-create.js",
     "table:qr": "tsc -p tsconfig.build.json && node dist/cli/table-qr.js",
+    "table:presence": "tsc -p tsconfig.build.json && node dist/cli/table-presence.js",
+    "dev:accounts": "tsc -p tsconfig.build.json && node dist/cli/dev-accounts.js",
     "designs:svg": "tsc -p tsconfig.build.json && node dist/cli/design-svg.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",

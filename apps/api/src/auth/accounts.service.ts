@@ -55,7 +55,8 @@ export class AccountsService {
   }
 
   /**
-   * An admin, active straight away. Only the `admin:create` command calls this.
+   * An admin, active straight away. Used by the bootstrap command and the
+   * authenticated administrator-management endpoint.
    *
    * @throws AccountAlreadyExistsError if the email is taken.
    * @throws Error if the password is not 14 to 200 characters.
